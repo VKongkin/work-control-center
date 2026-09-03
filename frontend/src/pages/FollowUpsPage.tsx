@@ -7,8 +7,8 @@ import { useResource, clean, toId } from '../hooks/useResource';
 import { useLookups } from '../hooks/useLookups';
 import { useForm } from '../hooks/useForm';
 import {
-  Badge, Button, ConfirmDialog, DateField, EmptyState, ErrorBanner, ErrorSummary,
-  Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
+  Badge, Button, ComboboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
+  ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from '../components/ui';
 import { FOLLOWUP_STATUSES, WAITING_FOR_TYPES, fmtDate, isOverdue, toDateInput } from '../lib/constants';
 import { maxLength, notBefore, required, saneDate } from '../lib/validators';
@@ -283,13 +283,13 @@ export default function FollowUpsPage() {
           />
           {/* Only the relation matching the chosen type is offered. */}
           {form.values.waiting_for_type === 'PERSON' && (
-            <SelectField {...fx('person_id')} label="Person" value={form.values.person_id} onChange={set('person_id')} options={lk.people} className="sm:col-span-2" />
+            <ComboboxField {...fx('person_id')} label="Person" value={form.values.person_id} onChange={set('person_id')} options={lk.people} className="sm:col-span-2" />
           )}
           {form.values.waiting_for_type === 'DEPARTMENT' && (
-            <SelectField {...fx('department_id')} label="Department" value={form.values.department_id} onChange={set('department_id')} options={lk.departments} className="sm:col-span-2" />
+            <ComboboxField {...fx('department_id')} label="Department" value={form.values.department_id} onChange={set('department_id')} options={lk.departments} className="sm:col-span-2" />
           )}
           {form.values.waiting_for_type === 'VENDOR' && (
-            <SelectField {...fx('vendor_id')} label="Vendor" value={form.values.vendor_id} onChange={set('vendor_id')} options={lk.vendors} className="sm:col-span-2" />
+            <ComboboxField {...fx('vendor_id')} label="Vendor" value={form.values.vendor_id} onChange={set('vendor_id')} options={lk.vendors} className="sm:col-span-2" />
           )}
           <DateField {...fx('requested_date')} label="Requested on" value={form.values.requested_date} onChange={set('requested_date')} />
           <DateField

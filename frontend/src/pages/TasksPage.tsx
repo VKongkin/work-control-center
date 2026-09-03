@@ -7,8 +7,8 @@ import { useResource, clean, toId } from '../hooks/useResource';
 import { useLookups } from '../hooks/useLookups';
 import { useForm } from '../hooks/useForm';
 import {
-  Badge, Button, ConfirmDialog, DateField, EmptyState, ErrorBanner, ErrorSummary,
-  Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
+  Badge, Button, ComboboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
+  ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from '../components/ui';
 import { PRIORITIES, TASK_STATUSES, fmtDate, isOverdue, toDateInput } from '../lib/constants';
 import { maxLength, required, requiredWhen, saneDate } from '../lib/validators';
@@ -310,12 +310,12 @@ export default function TasksPage() {
             {...fx('due_date')} label="Due date" value={form.values.due_date} onChange={set('due_date')}
             hint="Leave empty if there is no deadline"
           />
-          <SelectField {...fx('category_id')} label="Category" value={form.values.category_id} onChange={set('category_id')} options={lk.categories} />
-          <SelectField {...fx('project_id')} label="Project" value={form.values.project_id} onChange={set('project_id')} options={lk.projects} />
-          <SelectField {...fx('system_id')} label="System" value={form.values.system_id} onChange={set('system_id')} options={lk.systems} />
-          <SelectField {...fx('department_id')} label="Department" value={form.values.department_id} onChange={set('department_id')} options={lk.departments} />
-          <SelectField {...fx('vendor_id')} label="Vendor" value={form.values.vendor_id} onChange={set('vendor_id')} options={lk.vendors} />
-          <SelectField
+          <ComboboxField {...fx('category_id')} label="Category" value={form.values.category_id} onChange={set('category_id')} options={lk.categories} />
+          <ComboboxField {...fx('project_id')} label="Project" value={form.values.project_id} onChange={set('project_id')} options={lk.projects} />
+          <ComboboxField {...fx('system_id')} label="System" value={form.values.system_id} onChange={set('system_id')} options={lk.systems} />
+          <ComboboxField {...fx('department_id')} label="Department" value={form.values.department_id} onChange={set('department_id')} options={lk.departments} />
+          <ComboboxField {...fx('vendor_id')} label="Vendor" value={form.values.vendor_id} onChange={set('vendor_id')} options={lk.vendors} />
+          <ComboboxField
             {...fx('responsible_person_id')} label="Responsible person"
             value={form.values.responsible_person_id} onChange={set('responsible_person_id')}
             options={lk.people} className="sm:col-span-2"

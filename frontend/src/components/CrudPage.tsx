@@ -5,7 +5,7 @@ import { useLookups } from '../hooks/useLookups';
 import { useForm } from '../hooks/useForm';
 import {
   Badge, Button, CheckboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
-  ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
+  ComboboxField, ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from './ui';
 import { Option, fmtDate, toDateInput } from '../lib/constants';
 import { Rule, email, maxLength, phone, required, saneDate } from '../lib/validators';
@@ -301,7 +301,9 @@ export default function CrudPage<T extends { id: number }>({
             const value = form.values[f.key] ?? '';
             if (f.type === 'textarea')
               return <TextAreaField {...shared} value={value} onChange={set} placeholder={f.placeholder} />;
-            if (f.type === 'select' || f.type === 'lookup')
+            if (f.type === 'lookup')
+              return <ComboboxField {...shared} value={value} onChange={set} options={optionsFor(f)} />;
+            if (f.type === 'select')
               return <SelectField {...shared} value={value} onChange={set} options={optionsFor(f)} />;
             if (f.type === 'date')
               return <DateField {...shared} value={value} onChange={set} />;

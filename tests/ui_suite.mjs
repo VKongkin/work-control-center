@@ -19,6 +19,37 @@ page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 
 const go = async (p) => { await page.goto(BASE + p, { waitUntil: 'networkidle' }); await page.waitForTimeout(350); };
 const dialog = () => page.locator('[role="dialog"]');
+
+/* Relation pickers are searchable comboboxes; their list portals to the body. */
+const comboOpen = async (id) => {
+  if ((await page.locator('[role="option"]').count()) > 0) return;   // already open
+  await page.locator(`#${id}`).click();
+  await page.waitForTimeout(320);
+  // the list opens on focus, so a click does nothing when the input already
+  // had focus; ArrowDown opens it either way
+  if ((await page.locator('[role="option"]').count()) === 0) {
+    await page.locator(`#${id}`).press('ArrowDown');
+    await page.waitForTimeout(320);
+  }
+};
+const comboLabels = async (id) => {
+  await comboOpen(id);
+  const t = await page.locator('[role="option"]').allTextContents();
+  // Escape is safe only while the list is genuinely open - otherwise it bubbles
+  // to the dialog and closes the whole form
+  if ((await page.locator('[role="option"]').count()) > 0) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  }
+  return t.map(x => x.trim());
+};
+const comboPick = async (id, { index, label } = {}) => {
+  await comboOpen(id);
+  const opts = page.locator('[role="option"]');
+  if (label) await opts.filter({ hasText: label }).first().click();
+  else await opts.nth(index ?? 0).click();
+  await page.waitForTimeout(250);
+};
 const stamp = () => String(Date.now()).slice(-6);
 
 /* ---------------------------------------------------------------- pages */
@@ -59,7 +90,7 @@ for (const c of CRUD) {
 
   await page.locator(`button:has-text("New ${c.singular}")`).first().click();
   await page.waitForTimeout(350);
-  check(`${c.singular}: form opens`, await dialog().isVisible());
+  check(`${c.singular}: form opens`, (await dialog().count()) > 0);
 
   await dialog().locator(`#f-${c.nameField}`).fill(value);
   await page.locator(`button:has-text("${c.create}")`).click();
@@ -125,7 +156,7 @@ await page.locator('button:has-text("New Task")').first().click();
 await page.waitForTimeout(350);
 await page.locator('button:has-text("Create task")').click();
 await page.waitForTimeout(600);
-check('blank title blocks submit', await dialog().isVisible());
+check('blank title blocks submit', (await dialog().count()) > 0);
 check('summary names the problem', (await dialog().textContent()).includes('Title is required'));
 check('field shows inline error', await dialog().locator('#f-title-error').count() > 0);
 check('field marked invalid for a11y',
@@ -145,7 +176,7 @@ await page.waitForTimeout(400);
 check('blocked reason field appears', await dialog().locator('#f-blocked_reason').count() > 0);
 await page.locator('button:has-text("Create task")').click();
 await page.waitForTimeout(600);
-check('blocked without a reason is refused', await dialog().isVisible());
+check('blocked without a reason is refused', (await dialog().count()) > 0);
 check('and it says why', (await dialog().textContent()).includes('Blocked reason is required'));
 await dialog().locator('#f-blocked_reason').fill('Waiting on the network team');
 await page.waitForTimeout(300);
@@ -201,7 +232,7 @@ await page.waitForTimeout(350);
 await dialog().locator('#f-name').fill(firstDept);
 await page.locator('button:has-text("Create department")').click();
 await page.waitForTimeout(1500);
-check('duplicate name keeps the form open', await dialog().isVisible());
+check('duplicate name keeps the form open', (await dialog().count()) > 0);
 const dupText = await dialog().textContent();
 check('duplicate explained in plain words', /already exists/i.test(dupText), dupText.slice(0, 120));
 check('duplicate mentions archived records', /archived/i.test(dupText));
@@ -244,9 +275,11 @@ await page.waitForTimeout(700);
 for (const [id, label] of [['f-project_id','Project'],['f-system_id','System'],
   ['f-department_id','Department'],['f-vendor_id','Vendor'],
   ['f-responsible_person_id','Responsible person'],['f-category_id','Category']]) {
-  const n = await dialog().locator(`#${id} option`).count();
-  check(`${label} dropdown is populated`, n > 1, `${n} options`);
+  const n = (await comboLabels(id)).length;
+  check(`${label} picker is populated`, n > 0, `${n} options`);
 }
+check('relation pickers are searchable',
+  await dialog().locator('#f-responsible_person_id').getAttribute('role') === 'combobox');
 await dialog().locator('button[aria-label="Close"]').click();
 await page.waitForTimeout(400);
 
@@ -258,8 +291,8 @@ await page.waitForTimeout(400);
 await dialog().locator('#f-title').fill(tName);
 await dialog().locator('#f-priority').selectOption('P0_CRITICAL');
 await dialog().locator('#f-due_date').fill('2020-01-01');
-const projOpts = await dialog().locator('#f-project_id option').count();
-if (projOpts > 1) await dialog().locator('#f-project_id').selectOption({ index: 1 });
+const projOpts = (await comboLabels('f-project_id')).length;
+if (projOpts > 0) await comboPick('f-project_id', { index: 0 });
 await page.locator('button:has-text("Create task")').click();
 await page.waitForTimeout(1400);
 const wfRow = page.locator('tbody tr', { hasText: tName }).first();
@@ -323,7 +356,7 @@ for (const [label, expect] of [
 await go('/');
 await page.locator('button:has-text("New Task")').first().click();
 await page.waitForTimeout(1200);
-check('dashboard "New Task" opens the form', await dialog().isVisible());
+check('dashboard "New Task" opens the form', (await dialog().count()) > 0);
 
 section('Navigation and routing');
 await go('/tasks');

@@ -3,6 +3,7 @@ import {
   peopleApi, departmentApi, vendorApi, systemApi, projectApi, categoryApi,
 } from '../api/client';
 import { Option } from '../lib/constants';
+import { MUTATION_EVENT } from './useResource';
 
 interface Lookups {
   people: Option[];
@@ -58,6 +59,23 @@ export function LookupProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  /**
+   * Refresh when one of these entities changes anywhere in the app, so a
+   * person added under Directory shows up in the next form the user opens
+   * without them having to reload the page.
+   */
+  useEffect(() => {
+    const FEEDS_LOOKUPS = new Set([
+      'Person', 'Department', 'Vendor', 'System', 'Project', 'Category',
+    ]);
+    const onMutation = (e: Event) => {
+      const label = (e as CustomEvent<{ label?: string }>).detail?.label;
+      if (label && FEEDS_LOOKUPS.has(label)) load();
+    };
+    window.addEventListener(MUTATION_EVENT, onMutation);
+    return () => window.removeEventListener(MUTATION_EVENT, onMutation);
   }, [load]);
 
   const nameOf: Lookups['nameOf'] = (kind, id) => {

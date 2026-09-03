@@ -53,6 +53,7 @@ export function useResource<T extends { id: number }>(
       setSaving(true);
       try {
         await api.create(data);
+        announce(label);
         toast.success(`${label} created`);
         await refresh();
         return true;
@@ -72,6 +73,7 @@ export function useResource<T extends { id: number }>(
       setSaving(true);
       try {
         await api.update(id, data);
+        announce(label);
         if (!quiet) toast.success(`${label} updated`);
         await refresh();
         return true;
@@ -91,6 +93,7 @@ export function useResource<T extends { id: number }>(
       setSaving(true);
       try {
         await api.delete(id);
+        announce(label);
         toast.success(`${label} deleted`);
         await refresh();
         return true;
@@ -106,6 +109,20 @@ export function useResource<T extends { id: number }>(
   );
 
   return { items, loading, error, saving, refresh, create, update, remove };
+}
+
+/**
+ * Broadcast that a record changed.
+ *
+ * The relation dropdowns are shared app-wide and used to load once at startup,
+ * so a person added under Directory stayed invisible to every form until a
+ * page refresh. Announcing the change here lets anything holding cached copies
+ * refresh itself, without each page having to remember to ask.
+ */
+export const MUTATION_EVENT = 'wcc:mutated';
+
+function announce(label: string) {
+  window.dispatchEvent(new CustomEvent(MUTATION_EVENT, { detail: { label } }));
 }
 
 /** Strip '' -> null so empty form fields clear the column instead of failing validation. */

@@ -24,6 +24,38 @@ page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 const go = async p => { await page.goto(BASE + p, { waitUntil: 'networkidle' }); await page.waitForTimeout(400); };
 const D = () => page.locator('[role="dialog"]');
 const card = name => page.locator('div.rounded-xl.border', { hasText: name }).first();
+
+/* Relation pickers are searchable comboboxes; their list portals to the body. */
+const comboOpen = async (id) => {
+  if ((await page.locator('[role="option"]').count()) > 0) return;   // already open
+  await page.locator(`#${id}`).click();
+  await page.waitForTimeout(320);
+  // the list opens on focus, so a click does nothing when the input already
+  // had focus; ArrowDown opens it either way
+  if ((await page.locator('[role="option"]').count()) === 0) {
+    await page.locator(`#${id}`).press('ArrowDown');
+    await page.waitForTimeout(320);
+  }
+};
+const comboLabels = async (id) => {
+  await comboOpen(id);
+  const t = await page.locator('[role="option"]').allTextContents();
+  // Escape is safe only while the list is genuinely open - otherwise it bubbles
+  // to the dialog and closes the whole form
+  if ((await page.locator('[role="option"]').count()) > 0) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  }
+  return t.map(x => x.trim());
+};
+const comboPick = async (id, { index, label } = {}) => {
+  await comboOpen(id);
+  const opts = page.locator('[role="option"]');
+  if (label) await opts.filter({ hasText: label }).first().click();
+  else await opts.nth(index ?? 0).click();
+  await page.waitForTimeout(250);
+};
+
 const stamp = () => String(Date.now()).slice(-6);
 const created = [];
 
@@ -64,25 +96,25 @@ check('Department target removed', await D().locator('#f-department_id').count()
 
 const opts = {
   person: await (async () => { await D().locator('#f-waiting_for_type').selectOption('PERSON');
-    await page.waitForTimeout(250); return D().locator('#f-person_id option').count(); })(),
+    await page.waitForTimeout(250); return (await comboLabels('f-person_id')).length; })(),
   dept: await (async () => { await D().locator('#f-waiting_for_type').selectOption('DEPARTMENT');
-    await page.waitForTimeout(250); return D().locator('#f-department_id option').count(); })(),
+    await page.waitForTimeout(250); return (await comboLabels('f-department_id')).length; })(),
   vendor: await (async () => { await D().locator('#f-waiting_for_type').selectOption('VENDOR');
-    await page.waitForTimeout(250); return D().locator('#f-vendor_id option').count(); })(),
+    await page.waitForTimeout(250); return (await comboLabels('f-vendor_id')).length; })(),
 };
-check('Person list populated', opts.person > 1, `${opts.person}`);
-check('Department list populated', opts.dept > 1, `${opts.dept}`);
-check('Vendor list populated', opts.vendor > 1, `${opts.vendor}`);
+check('Person list populated', opts.person > 0, `${opts.person}`);
+check('Department list populated', opts.dept > 0, `${opts.dept}`);
+check('Vendor list populated', opts.vendor > 0, `${opts.vendor}`);
 
 /* ── the important one: does an abandoned target get left behind? ── */
 section('Switching type must not leave the old target attached');
 await D().locator('#f-waiting_for_type').selectOption('PERSON');
 await page.waitForTimeout(250);
-await D().locator('#f-person_id').selectOption({ index: 1 });
-const pickedPerson = await D().locator('#f-person_id').inputValue();
+await comboPick('f-person_id', { index: 0 });
+const pickedPerson = await D().locator('#f-person_id').inputValue();  // label, not id
 await D().locator('#f-waiting_for_type').selectOption('VENDOR');
 await page.waitForTimeout(250);
-await D().locator('#f-vendor_id').selectOption({ index: 1 });
+await comboPick('f-vendor_id', { index: 0 });
 const title0 = `FU switch ${stamp()}`;
 await D().locator('#f-title').fill(title0);
 await page.locator('button:has-text("Create follow-up")').click();
@@ -102,10 +134,10 @@ await page.locator('button:has-text("New Follow-up")').first().click();
 await page.waitForTimeout(400);
 await D().locator('#f-waiting_for_type').selectOption('DEPARTMENT');
 await page.waitForTimeout(250);
-await D().locator('#f-department_id').selectOption({ index: 1 });
+await comboPick('f-department_id', { index: 0 });
 await D().locator('#f-waiting_for_type').selectOption('PERSON');
 await page.waitForTimeout(250);
-await D().locator('#f-person_id').selectOption({ index: 1 });
+await comboPick('f-person_id', { index: 0 });
 const title1 = `FU switch2 ${stamp()}`;
 await D().locator('#f-title').fill(title1);
 await page.locator('button:has-text("Create follow-up")').click();
@@ -120,7 +152,7 @@ check('and keeps the new one', saved1?.person_id != null);
 await go('/followups');
 await page.locator('button:has-text("New Follow-up")').first().click();
 await page.waitForTimeout(400);
-await D().locator('#f-person_id').selectOption({ index: 1 });
+await comboPick('f-person_id', { index: 0 });
 await D().locator('#f-waiting_for_type').selectOption('VENDOR');
 await page.waitForTimeout(250);
 await D().locator('#f-waiting_for_type').selectOption('PERSON');
@@ -146,8 +178,8 @@ for (const [type, field] of [['PERSON','person_id'], ['DEPARTMENT','department_i
   await D().locator('#f-title').fill(t);
   await D().locator('#f-waiting_for_type').selectOption(type);
   await page.waitForTimeout(300);
-  await D().locator(`#f-${field}`).selectOption({ index: 1 });
-  const chosen = await D().locator(`#f-${field} option:checked`).textContent();
+  await comboPick(`f-${field}`, { index: 0 });
+  const chosen = await D().locator(`#f-${field}`).inputValue();
   await page.locator('button:has-text("Create follow-up")').click();
   await page.waitForTimeout(1500);
   created.push(t);
@@ -223,7 +255,7 @@ await page.locator('button:has-text("New Follow-up")').first().click();
 await page.waitForTimeout(400);
 await page.locator('button:has-text("Create follow-up")').click();
 await page.waitForTimeout(700);
-check('blank title refused', await D().isVisible());
+check('blank title refused', (await D().count()) > 0);
 check('and it says so', (await D().textContent()).includes('Title is required'));
 check('focus lands on the title', (await page.evaluate(() => document.activeElement?.id)) === 'f-title');
 
@@ -294,10 +326,10 @@ check('status change saved', (await card(ed + ' edited').textContent()).includes
 
 await card(ed + ' edited').locator('button[aria-label="Edit"]').click();
 await page.waitForTimeout(600);
-await D().locator('#f-department_id').selectOption({ index: 1 });
+await comboPick('f-department_id', { index: 0 });
 await D().locator('#f-waiting_for_type').selectOption('VENDOR');
 await page.waitForTimeout(300);
-await D().locator('#f-vendor_id').selectOption({ index: 1 });
+await comboPick('f-vendor_id', { index: 0 });
 await page.locator('button:has-text("Save changes")').click();
 await page.waitForTimeout(1600);
 const reSaved = (await api('GET', '/api/followups?limit=300')).body.find(f => f.title === ed + ' edited');
@@ -454,7 +486,7 @@ await page.waitForTimeout(400);
 await D().locator('#f-title').fill(longTitle);
 await page.locator('button:has-text("Create follow-up")').click();
 await page.waitForTimeout(900);
-check('over-long title refused before the network', await D().isVisible());
+check('over-long title refused before the network', (await D().count()) > 0);
 check('and explains the limit', (await D().textContent()).includes('255 characters or fewer'));
 await D().locator('button[aria-label="Close"]').click();
 await page.waitForTimeout(300);

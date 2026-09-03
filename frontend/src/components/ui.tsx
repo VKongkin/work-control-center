@@ -1,5 +1,9 @@
-import { ReactNode, useCallback, useEffect, useState } from 'react';
-import { X, Inbox, AlertTriangle } from 'lucide-react';
+import { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Combobox, ComboboxButton, ComboboxInput, ComboboxOption, ComboboxOptions,
+  Dialog, DialogBackdrop, DialogPanel, DialogTitle,
+} from '@headlessui/react';
+import { X, Inbox, AlertTriangle, Check, ChevronsUpDown } from 'lucide-react';
 import { TONE, labelFor, Option } from '../lib/constants';
 
 /* ---------------------------------------------------------------- Badge */
@@ -32,76 +36,68 @@ interface ModalProps {
 export function Modal({ open, title, onClose, children, footer, wide, dirty }: ModalProps) {
   const [askDiscard, setAskDiscard] = useState(false);
 
+  // Headless UI routes Escape and backdrop clicks through onClose, so the
+  // unsaved-changes guard lives here and covers every way out.
   const attemptClose = useCallback(() => {
+    if (askDiscard) { setAskDiscard(false); return; }
     if (dirty) setAskDiscard(true);
     else onClose();
-  }, [dirty, onClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (askDiscard) setAskDiscard(false);
-        else attemptClose();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
-  }, [open, attemptClose, askDiscard]);
+  }, [askDiscard, dirty, onClose]);
 
   useEffect(() => {
     if (!open) setAskDiscard(false);
   }, [open]);
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 sm:p-6">
-      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[1px]" onClick={attemptClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={`relative my-8 w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} rounded-xl bg-white shadow-xl ring-1 ring-slate-200`}
-      >
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
-          <button
-            onClick={attemptClose}
-            aria-label="Close"
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+    <Dialog open={open} onClose={attemptClose} className="relative z-50">
+      <DialogBackdrop
+        transition
+        className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] transition-opacity duration-200 ease-out data-[closed]:opacity-0"
+      />
+      <div className="fixed inset-0 w-screen overflow-y-auto p-4 sm:p-6">
+        <div className="flex min-h-full items-start justify-center">
+          <DialogPanel
+            transition
+            className={`my-8 w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5 transition duration-200 ease-out data-[closed]:translate-y-2 data-[closed]:opacity-0 data-[closed]:scale-[0.98]`}
           >
-            <X size={18} />
-          </button>
-        </div>
-
-        {askDiscard ? (
-          <div className="px-6 py-6">
-            <p className="font-medium text-slate-900">Discard your changes?</p>
-            <p className="mt-1 text-sm text-slate-600">
-              You have edits that have not been saved yet.
-            </p>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button onClick={() => setAskDiscard(false)}>Keep editing</Button>
-              <Button variant="danger" onClick={onClose}>Discard changes</Button>
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <DialogTitle className="text-lg font-semibold tracking-tight text-slate-900">
+                {title}
+              </DialogTitle>
+              <button
+                onClick={attemptClose}
+                aria-label="Close"
+                className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={18} />
+              </button>
             </div>
-          </div>
-        ) : (
-          <>
-            <div className="px-6 py-5">{children}</div>
-            {footer && (
-              <div className="flex justify-end gap-2 rounded-b-xl border-t border-slate-200 bg-slate-50 px-6 py-4">
-                {footer}
+
+            {askDiscard ? (
+              <div className="px-6 py-6">
+                <p className="font-medium text-slate-900">Discard your changes?</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  You have edits that have not been saved yet.
+                </p>
+                <div className="mt-5 flex justify-end gap-2">
+                  <Button onClick={() => setAskDiscard(false)}>Keep editing</Button>
+                  <Button variant="danger" onClick={onClose}>Discard changes</Button>
+                </div>
               </div>
+            ) : (
+              <>
+                <div className="px-6 py-5">{children}</div>
+                {footer && (
+                  <div className="flex justify-end gap-2 rounded-b-2xl border-t border-slate-200 bg-slate-50 px-6 py-4">
+                    {footer}
+                  </div>
+                )}
+              </>
             )}
-          </>
-        )}
+          </DialogPanel>
+        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -265,6 +261,104 @@ export function SelectField({
           </option>
         ))}
       </select>
+      <FieldNote error={error} hint={hint} id={id} />
+    </div>
+  );
+}
+
+/**
+ * Searchable picker for a relation (owner, vendor, system...).
+ *
+ * These lists grow without bound in a real workspace, where scrolling a native
+ * dropdown to find one person among two hundred is miserable. Typing filters
+ * the list; the field still reports a plain id string so callers are unchanged.
+ */
+export function ComboboxField({
+  label, value, onChange, options, required, error, hint, className = '',
+  name, onBlur, placeholder = 'Search or select…',
+}: BaseField & {
+  value: string;
+  onChange: (v: string) => void;
+  options: Option[];
+  placeholder?: string;
+}) {
+  const id = idFor(name, label);
+  const [query, setQuery] = useState('');
+
+  const selected = useMemo(
+    () => options.find((o) => o.value === value) ?? null,
+    [options, value]
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(q));
+  }, [options, query]);
+
+  return (
+    <div className={className}>
+      <Label label={label} required={required} htmlFor={id} />
+      <Combobox
+        immediate
+        value={value}
+        onChange={(v: string | null) => onChange(v ?? '')}
+        onClose={() => setQuery('')}
+      >
+        <div className="relative">
+          <ComboboxInput
+            id={id}
+            name={name}
+            autoComplete="off"
+            placeholder={placeholder}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className={`${fieldBase} pr-16 ${error ? fieldBad : fieldOk}`}
+            displayValue={() => selected?.label ?? ''}
+            onChange={(e) => setQuery(e.target.value)}
+            onBlur={onBlur}
+          />
+
+          <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 pr-1.5">
+            {value && (
+              <button
+                type="button"
+                aria-label={`Clear ${label.toLowerCase()}`}
+                onClick={() => { onChange(''); setQuery(''); }}
+                className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={14} />
+              </button>
+            )}
+            <ComboboxButton
+              aria-label={`Open ${label.toLowerCase()} list`}
+              className="rounded p-1 text-slate-400 transition-colors hover:text-slate-600"
+            >
+              <ChevronsUpDown size={15} />
+            </ComboboxButton>
+          </div>
+
+          <ComboboxOptions
+            transition
+            anchor="bottom start"
+            className="z-[60] w-[var(--input-width)] rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-900/10 transition duration-100 ease-out empty:invisible data-[closed]:opacity-0 [--anchor-gap:4px]"
+          >
+            {filtered.length === 0 && (
+              <div className="px-3 py-2 text-sm text-slate-500">No match for “{query}”</div>
+            )}
+            {filtered.map((o) => (
+              <ComboboxOption
+                key={o.value}
+                value={o.value}
+                className="group flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm text-slate-700 data-[focus]:bg-blue-50 data-[focus]:text-blue-700"
+              >
+                <span className="truncate">{o.label}</span>
+                {o.value === value && <Check size={15} className="shrink-0 text-blue-600" />}
+              </ComboboxOption>
+            ))}
+          </ComboboxOptions>
+        </div>
+      </Combobox>
       <FieldNote error={error} hint={hint} id={id} />
     </div>
   );
