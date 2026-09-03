@@ -1,5 +1,7 @@
 # Work Control Center (WCC)
 
+> **Running this on another machine?** See [DEPLOY.md](DEPLOY.md) — `docker compose up -d` pulls the published images, no build required.
+
 A professional personal work management application designed for users working in complex enterprise environments who need to manage work across multiple departments, teams, vendors, and systems.
 
 ## Problem Solved
@@ -73,7 +75,9 @@ The default configuration uses:
 ### 3. Start the Application
 
 ```bash
-docker compose up -d --build
+docker compose up -d          # published images
+# or, to build from this source:
+# docker compose -f docker-compose.build.yml up -d --build
 ```
 
 This will:
@@ -173,7 +177,9 @@ http://localhost:8000/docs
 ### Start the Application
 
 ```bash
-docker compose up -d --build
+docker compose up -d          # published images
+# or, to build from this source:
+# docker compose -f docker-compose.build.yml up -d --build
 ```
 
 ### Stop the Application
@@ -200,7 +206,9 @@ docker compose logs -f db
 
 ```bash
 docker compose down -v
-docker compose up -d --build
+docker compose up -d
+# or, to build from this source:
+# docker compose -f docker-compose.build.yml up -d --build
 ```
 
 This removes all data and starts fresh.
@@ -343,7 +351,7 @@ docker compose logs db
 
 ```bash
 # Rebuild frontend
-docker compose build frontend
+docker compose -f docker-compose.build.yml build frontend
 docker compose up -d frontend
 ```
 
@@ -351,7 +359,9 @@ docker compose up -d frontend
 
 ```bash
 docker compose down -v --remove-orphans
-docker compose up -d --build
+docker compose up -d          # published images
+# or, to build from this source:
+# docker compose -f docker-compose.build.yml up -d --build
 ```
 
 ## Testing

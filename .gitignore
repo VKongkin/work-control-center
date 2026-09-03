@@ -67,3 +67,6 @@ logs/
 
 # Local setup archives created during deployment
 .setup-archive/
+
+# Database backups
+wcc-backup*.sql

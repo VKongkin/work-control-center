@@ -29,7 +29,9 @@ Edit `.env` if you want to customize:
 ### 3. Build and Start
 
 ```bash
-docker compose up -d --build
+docker compose up -d          # published images
+# or, to build from this source:
+# docker compose -f docker-compose.build.yml up -d --build
 ```
 
 Or use the Makefile:
