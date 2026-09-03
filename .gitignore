@@ -1,0 +1,69 @@
+# Python build artefacts.
+# These are anchored with a leading slash so they only match at the repository
+# root. Unanchored, a bare "lib/" also matches frontend/src/lib/, which silently
+# kept real source out of git.
+/build/
+/develop-eggs/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.installed.cfg
+.pytest_cache/
+
+# Virtual environments
+/venv/
+/env/
+/ENV/
+/.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables (.env.example is committed)
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Build output
+frontend/dist/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Database
+*.db
+*.sqlite
+postgres_data/
+
+# Logs
+*.log
+logs/
+
+# Local setup archives created during deployment
+.setup-archive/

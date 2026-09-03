@@ -1,0 +1,8 @@
+# node_modules must never enter the build context - the image installs its own,
+# and copying a host build (macOS/arm) over it produces a broken image.
+node_modules/
+dist/
+npm-debug.log*
+.env
+.git
+.gitignore

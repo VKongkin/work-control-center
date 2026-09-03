@@ -1,0 +1,99 @@
+name: Build and publish images
+
+# Both images live in one Docker Hub repository and are told apart by a tag
+# prefix, e.g. vkongkin/work-control-center:backend-latest.
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE: vkongkin/work-control-center
+
+jobs:
+  build:
+    name: ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: ./backend
+          - component: frontend
+            context: ./frontend
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # Emulation for the arm64 build. Apple Silicon runs arm64 natively, so
+      # publishing both architectures keeps the image fast on your Mac and on a
+      # normal x86 server.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # A pull request builds to prove it compiles, but publishes nothing.
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # Every tag carries the component prefix so the two images can share
+          # one repository without colliding.
+          tags: |
+            type=raw,value=${{ matrix.component }}-latest,enable={{is_default_branch}}
+            type=sha,format=short,prefix=${{ matrix.component }}-
+            type=semver,pattern={{version}},prefix=${{ matrix.component }}-
+            type=semver,pattern={{major}}.{{minor}},prefix=${{ matrix.component }}-
+            type=ref,event=pr,prefix=${{ matrix.component }}-pr-
+          labels: |
+            org.opencontainers.image.title=Work Control Center ${{ matrix.component }}
+            org.opencontainers.image.description=Personal work management system - ${{ matrix.component }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Layer cache lives in the Actions cache, so later runs only rebuild
+          # what actually changed.
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+          provenance: false
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.component }}"
+            echo
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "Built for verification. Nothing was pushed."
+            else
+              echo "Pushed to \`${{ env.IMAGE }}\`:"
+              echo
+              echo '```'
+              echo "${{ steps.meta.outputs.tags }}"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
