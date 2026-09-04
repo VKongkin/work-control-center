@@ -62,6 +62,57 @@ docker compose exec -T db pg_dump -U wcc_user -d wcc_db --clean --if-exists > wc
 docker compose exec -T db psql   -U wcc_user -d wcc_db < wcc-backup.sql
 ```
 
+## What can and cannot delete your data
+
+Your records live in a Docker **volume**, not inside a container. Containers are
+disposable; the volume is not.
+
+| Command | Effect on your data |
+|---|---|
+| `docker compose up -d` | Safe. Reuses the existing volume. |
+| `docker compose up -d --build` | Safe. Postgres has no build step — it is a pulled image, so `--build` never touches it. Only the app images rebuild. |
+| `docker compose down` | Safe. Stops containers, volume untouched. |
+| `docker compose restart` | Safe. |
+| `docker compose pull` | Safe. Newer app images, same database. |
+| **`docker compose down -v`** | **Deletes everything.** The `-v` removes volumes. |
+| **`make reset`** | **Deletes everything** — but asks for confirmation and writes `wcc-backup.sql` first. |
+
+So a plain `up -d --build` is not the risk. The `-v` flag is.
+
+### The failure that actually looks like data loss
+
+The volume used to be named after the folder. Clone into `wcc` instead of
+`work-control-center`, or rename the directory, and Compose would look for a
+volume that does not exist, create an empty one, and start a fresh database.
+Nothing was deleted — the old volume is still there — but it reads as total
+data loss.
+
+The project and volume names are now pinned in the compose file, so the folder
+name no longer matters. Confirm yours matches:
+
+```bash
+docker volume ls | grep postgres_data
+# expected: work-control-center_postgres_data
+```
+
+If it prints a different name, your data is in that volume. Either rename the
+pin in `docker-compose.yml` to match it, or copy it across:
+
+```bash
+docker run --rm \
+  -v OLD_NAME:/from -v work-control-center_postgres_data:/to \
+  alpine sh -c 'cd /from && cp -a . /to'
+```
+
+### Before anything risky
+
+```bash
+make backup     # writes wcc-backup.sql
+```
+
+Worth doing before upgrading Postgres major versions, which is the one change
+an existing volume cannot survive on its own.
+
 ## Choosing a version
 
 `docker compose up -d` follows `latest`, which moves every time you push to

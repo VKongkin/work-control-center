@@ -2,6 +2,8 @@
 # developing; use the default docker-compose.yml to run published images.
 #
 #   docker compose -f docker-compose.build.yml up -d --build
+name: work-control-center
+
 services:
   db:
     image: postgres:15-alpine
@@ -87,6 +89,9 @@ services:
 
 volumes:
   postgres_data:
+    # Pinned to the name it already had, so an existing database keeps working
+    # and no longer depends on what this folder is called.
+    name: work-control-center_postgres_data
 
 networks:
   wcc-network:

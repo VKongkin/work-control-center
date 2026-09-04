@@ -7,6 +7,9 @@ BUILD   := -f docker-compose.build.yml
 help:
 	@echo "Work Control Center"
 	@echo ""
+	@echo "  Your data lives in the volume work-control-center_postgres_data."
+	@echo "  Only 'make reset' or 'docker compose down -v' can delete it."
+	@echo ""
 	@echo "  Running (published images - works on any machine with Docker)"
 	@echo "    make up             Pull and start everything"
 	@echo "    make pull           Fetch the newest images"
@@ -25,7 +28,7 @@ help:
 	@echo "  Data"
 	@echo "    make backup         Write wcc-backup.sql from the running database"
 	@echo "    make restore        Load wcc-backup.sql into the running database"
-	@echo "    make reset          Delete all data and start fresh"
+	@echo "    make reset          Delete all data and start fresh (asks first)"
 	@echo ""
 	@echo "  Shells"
 	@echo "    make shell-backend  Shell inside the backend container"
@@ -73,11 +76,22 @@ status:
 clean:
 	docker compose down --remove-orphans
 
+# The only command here that destroys data. It asks first and takes a backup
+# anyway, so a mistyped `make reset` is recoverable.
 reset:
+	@echo ""
+	@echo "  This deletes the database volume and every record in it."
+	@echo "  A backup will be written to wcc-backup.sql first."
+	@echo ""
+	@printf '  Type ERASE to confirm: '; read ans; \
+	  [ "$$ans" = "ERASE" ] || { echo "  Cancelled - nothing was touched."; exit 1; }
+	-@docker compose exec -T db pg_dump -U $(DB_USER) -d $(DB_NAME) --clean --if-exists > wcc-backup.sql 2>/dev/null \
+	  && echo "  Backed up to wcc-backup.sql" || echo "  (database not running - no backup taken)"
 	docker compose down -v --remove-orphans
 	docker compose up -d
 	@echo ""
 	@echo "  Database reset. Demo data reseeded."
+	@echo "  Your previous data is in wcc-backup.sql - restore it with: make restore"
 	@echo ""
 
 # Moving your real data to another machine: back up here, copy the file over,
