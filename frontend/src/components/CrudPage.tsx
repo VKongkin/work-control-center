@@ -1,5 +1,6 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, Archive, RotateCcw } from 'lucide-react';
+import DetailView, { DetailRow } from './DetailView';
 import { useResource, clean, toId } from '../hooks/useResource';
 import { useLookups } from '../hooks/useLookups';
 import { useForm } from '../hooks/useForm';
@@ -7,8 +8,12 @@ import {
   Badge, Button, CheckboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
   ComboboxField, ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from './ui';
-import { Option, fmtDate, toDateInput } from '../lib/constants';
+import { Option, fmtDate, labelFor, toDateInput } from '../lib/constants';
 import { Rule, email, maxLength, phone, required, saneDate } from '../lib/validators';
+
+// Records the upload endpoint recognises. Directory entries are references,
+// not work items, so they carry no files.
+const ATTACHABLE = new Set(['task', 'followup', 'issue', 'meeting', 'project']);
 
 type Lookups = ReturnType<typeof useLookups>;
 type LookupKey = 'people' | 'departments' | 'vendors' | 'systems' | 'projects' | 'categories';
@@ -56,11 +61,13 @@ interface Props<T> {
   archivable?: boolean;
   /** extra sentence on the delete confirmation, e.g. what happens to linked rows */
   deleteNote?: string;
+  /** entity_type used for file uploads; omit for records that carry no files */
+  attachAs?: string;
 }
 
 export default function CrudPage<T extends { id: number }>({
   title, subtitle, singular, api, fields, columns, labelKey = 'name' as any, emptyHint,
-  archivable, deleteNote,
+  archivable, deleteNote, attachAs,
 }: Props<T>) {
   const [showArchived, setShowArchived] = useState(false);
   const params = useMemo(
@@ -87,6 +94,7 @@ export default function CrudPage<T extends { id: number }>({
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<T | null>(null);
+  const [viewing, setViewing] = useState<T | null>(null);
   const [toDelete, setToDelete] = useState<T | null>(null);
 
   // Validation rules follow from each field's declared type, so a page only
@@ -152,6 +160,21 @@ export default function CrudPage<T extends { id: number }>({
       : await create(clean(payload) as Partial<T>);
     if (result === true) setOpen(false);
     else if (typeof result === 'string') form.setServerError(result);
+  }
+
+  /** The same field definitions that drive the form also describe the record. */
+  function detailRows(row: T): DetailRow[] {
+    return fields.map((f) => {
+      const raw = (row as any)[f.key];
+      let value: any = raw;
+      if (f.type === 'lookup') value = lk.nameOf(f.lookup!, raw);
+      else if (f.type === 'date') value = fmtDate(raw);
+      else if (f.type === 'checkbox') value = raw ? 'Active' : 'Archived';
+      else if (f.type === 'select') value = <Badge value={raw} />;
+      else if (raw === null || raw === undefined || raw === '') value = null;
+      if (value === '—') value = null;
+      return { label: f.label, value, wide: f.type === 'textarea' || f.full };
+    });
   }
 
   const optionsFor = (f: FieldDef): Option[] =>
@@ -226,7 +249,7 @@ export default function CrudPage<T extends { id: number }>({
                       <td key={c.header} className="px-4 py-3">
                         {i === 0 ? (
                           <button
-                            onClick={() => openEdit(row)}
+                            onClick={() => setViewing(row)}
                             className="text-left font-medium text-slate-900 hover:text-blue-700"
                           >
                             {cellValue(c, row)}
@@ -313,6 +336,20 @@ export default function CrudPage<T extends { id: number }>({
           })}
         </div>
       </Modal>
+
+      {viewing && (
+        <DetailView
+          open
+          onClose={() => setViewing(null)}
+          title={String((viewing as any)[labelKey] ?? singular)}
+          rows={detailRows(viewing)}
+          entityType={attachAs && ATTACHABLE.has(attachAs) ? attachAs : undefined}
+          entityId={viewing.id}
+          onEdit={() => { const row = viewing; setViewing(null); openEdit(row); }}
+          onDelete={() => { const row = viewing; setViewing(null); setToDelete(row); }}
+          deleteLabel={archivable ? 'Archive' : 'Delete'}
+        />
+      )}
 
       <ConfirmDialog
         open={!!toDelete}

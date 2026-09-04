@@ -10,6 +10,8 @@ from .issues import Issue
 from .meetings import Meeting
 from .categories import Category
 from .activity import Activity
+from .attachments import Attachment
+from .tools import Tool
 
 __all__ = [
     "Task",
@@ -23,4 +25,6 @@ __all__ = [
     "Meeting",
     "Category",
     "Activity",
+    "Attachment",
+    "Tool",
 ]

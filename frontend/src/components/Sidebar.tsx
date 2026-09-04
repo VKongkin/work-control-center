@@ -1,7 +1,11 @@
+import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
+import { toolApi } from '../api/client';
+import { Tool } from '../types';
+import { MUTATION_EVENT } from '../hooks/useResource';
 import {
   Home, Inbox, CheckSquare, Clock, BarChart3, AlertCircle, Users, Building,
-  Package, Server, Bug, CalendarDays, Tag, Search, X,
+  Package, Server, Bug, CalendarDays, Tag, Search, X, Wrench, Star,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -30,6 +34,12 @@ const GROUPS = [
     ],
   },
   {
+    label: 'Build',
+    items: [
+      { icon: Wrench, label: 'Tools', to: '/tools' },
+    ],
+  },
+  {
     label: 'Directory',
     items: [
       { icon: Users, label: 'People', to: '/people' },
@@ -43,6 +53,26 @@ const GROUPS = [
 
 export default function Sidebar({ open, onToggle }: SidebarProps) {
   const location = useLocation();
+
+  // Pinned tools get their own shortcuts, so a tool you reach for daily is one
+  // click away rather than two.
+  const [pinned, setPinned] = useState<Tool[]>([]);
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const rows = (await toolApi.getAll({ limit: 200 })).data as Tool[];
+        setPinned(rows.filter((t) => t.pinned));
+      } catch {
+        setPinned([]);
+      }
+    };
+    load();
+    const onMutation = (e: Event) => {
+      if ((e as CustomEvent<{ label?: string }>).detail?.label === 'Tool') load();
+    };
+    window.addEventListener(MUTATION_EVENT, onMutation);
+    return () => window.removeEventListener(MUTATION_EVENT, onMutation);
+  }, []);
 
   /**
    * Two entries share /tasks (Inbox is /tasks?status=INBOX), so matching on
@@ -120,6 +150,27 @@ export default function Sidebar({ open, onToggle }: SidebarProps) {
               </div>
             </div>
           ))}
+          {pinned.length > 0 && (
+            <div>
+              <p className="mb-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Pinned tools
+              </p>
+              <div className="space-y-0.5">
+                {pinned.map((t) => (
+                  <NavLink
+                    key={t.id}
+                    to={`/tools/${t.id}`}
+                    className={linkClass(location.pathname === `/tools/${t.id}`)}
+                    onClick={() => window.innerWidth < 768 && onToggle()}
+                    title={t.description ?? t.name}
+                  >
+                    <Star size={17} className="shrink-0" />
+                    <span className="truncate">{t.name}</span>
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          )}
         </nav>
       </aside>
     </>

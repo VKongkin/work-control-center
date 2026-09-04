@@ -26,7 +26,7 @@ export default function ProjectsPage() {
   return (
     <CrudPage<Project>
       title="Projects" singular="Project" api={projectApi}
-      fields={fields} columns={columns}
+      fields={fields} columns={columns} attachAs="project"
       deleteNote="Tasks and issues in this project are kept - they just stop being linked to it."
       subtitle="Grouped bodies of work"
       emptyHint="Group related tasks under a project to see them together."

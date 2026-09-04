@@ -1,12 +1,13 @@
 # Test suites
 
-Four suites, 494 checks, run against a live application.
+Five suites, 536 checks, run against a live application.
 
 | File | Checks | What it covers |
 |---|---|---|
 | `api_suite.py` | 217 | Every endpoint and method, all 10 entities' CRUD lifecycles, validation (required, blank, enums, uniqueness, foreign keys), 404s, filters, pagination, cascade behaviour, date handling, unicode |
 | `ui_suite.mjs` | 156 | All 13 pages in a real browser: create/edit/delete through the forms, validation behaviour, archive/restore, unsaved-changes guard, filters, routing, keyboard, mobile layout, console errors |
 | `followups_suite.mjs` | 96 | The follow-ups page in depth: all three waiting-for types, all five statuses, quick actions, the four dates, overdue signalling, alert rules, field-level update integrity |
+| `features_suite.mjs` | 42 | Detail views, file uploads to tasks, tool folders, the sandboxed tool runner, pinning |
 | `sync_suite.mjs` | 25 | Live data: a Directory record created, renamed, archived, restored or deleted must reach every form that references it without a page refresh |
 
 ## Running them
@@ -31,6 +32,7 @@ npm install -D playwright && npx playwright install chromium
 WCC_URL=http://localhost:3000 node tests/ui_suite.mjs
 WCC_URL=http://localhost:3000 node tests/followups_suite.mjs
 WCC_URL=http://localhost:3000 node tests/sync_suite.mjs
+WCC_URL=http://localhost:3000 node tests/features_suite.mjs
 ```
 
 Each exits non-zero on failure, so they drop straight into CI.

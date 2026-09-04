@@ -22,7 +22,7 @@ export default function MeetingsPage() {
   return (
     <CrudPage<Meeting>
       title="Meetings" singular="Meeting" api={meetingApi}
-      fields={fields} columns={columns}
+      fields={fields} columns={columns} attachAs="meeting"
       labelKey="title"
       subtitle="Notes, decisions and who was there"
       emptyHint="Capture meetings so decisions do not live only in your head."

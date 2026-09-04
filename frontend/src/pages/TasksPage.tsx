@@ -6,6 +6,7 @@ import { Task } from '../types';
 import { useResource, clean, toId } from '../hooks/useResource';
 import { useLookups } from '../hooks/useLookups';
 import { useForm } from '../hooks/useForm';
+import DetailView from '../components/DetailView';
 import {
   Badge, Button, ComboboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
   ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
@@ -49,6 +50,7 @@ export default function TasksPage() {
   const lk = useLookups();
 
   const [editing, setEditing] = useState<Task | null>(null);
+  const [viewing, setViewing] = useState<Task | null>(null);
   const [open, setOpen] = useState(false);
   const [toDelete, setToDelete] = useState<Task | null>(null);
   const form = useForm({ initial: blank, rules: RULES });
@@ -222,7 +224,7 @@ export default function TasksPage() {
                   <tr key={t.id} className="hover:bg-slate-50/70">
                     <td className="max-w-[320px] px-4 py-3">
                       <button
-                        onClick={() => openEdit(t)}
+                        onClick={() => setViewing(t)}
                         className="text-left font-medium text-slate-900 hover:text-blue-700"
                       >
                         {t.title}
@@ -331,6 +333,38 @@ export default function TasksPage() {
           <TextAreaField {...fx('notes')} label="Notes" value={form.values.notes} onChange={set('notes')} className="sm:col-span-2" />
         </div>
       </Modal>
+
+      {viewing && (
+        <DetailView
+          open
+          onClose={() => setViewing(null)}
+          title={viewing.title}
+          badges={<><Badge value={viewing.priority} /><Badge value={viewing.status} /></>}
+          subtitle={
+            isOverdue(viewing.due_date, viewing.status)
+              ? <span className="font-medium text-red-600">Overdue since {fmtDate(viewing.due_date)}</span>
+              : undefined
+          }
+          rows={[
+            { label: 'Description', value: viewing.description, wide: true },
+            { label: 'Due date', value: fmtDate(viewing.due_date) },
+            { label: 'Owner', value: lk.nameOf('people', viewing.responsible_person_id) },
+            { label: 'Project', value: lk.nameOf('projects', viewing.project_id) },
+            { label: 'System', value: lk.nameOf('systems', viewing.system_id) },
+            { label: 'Department', value: lk.nameOf('departments', viewing.department_id) },
+            { label: 'Vendor', value: lk.nameOf('vendors', viewing.vendor_id) },
+            { label: 'Category', value: lk.nameOf('categories', viewing.category_id) },
+            { label: 'Next action', value: viewing.next_action, wide: true },
+            { label: 'Blocked reason', value: viewing.blocked_reason, wide: true },
+            { label: 'Notes', value: viewing.notes, wide: true },
+            { label: 'Completed', value: viewing.completed_at ? fmtDate(viewing.completed_at) : null },
+          ].map((r) => (r.value === '—' ? { ...r, value: null } : r))}
+          entityType="task"
+          entityId={viewing.id}
+          onEdit={() => { const t = viewing; setViewing(null); openEdit(t); }}
+          onDelete={() => { const t = viewing; setViewing(null); setToDelete(t); }}
+        />
+      )}
 
       <ConfirmDialog
         open={!!toDelete}

@@ -171,3 +171,35 @@ export interface SearchResult {
   description?: string | null;
   status?: string | null;
 }
+
+export interface Attachment {
+  id: number;
+  entity_type: string;
+  entity_id: number;
+  filename: string;
+  /** Position within an uploaded folder, e.g. "css/style.css". */
+  path: string;
+  content_type: string;
+  size: number;
+  created_at?: string;
+}
+
+export interface Tool {
+  id: number;
+  name: string;
+  description?: string | null;
+  entry_path?: string | null;
+  pinned: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ToolManifest {
+  id: number;
+  name: string;
+  entry_path: string | null;
+  runnable: boolean;
+  file_count: number;
+  total_bytes: number;
+  files: { id: number; path: string; content_type: string; size: number }[];
+}

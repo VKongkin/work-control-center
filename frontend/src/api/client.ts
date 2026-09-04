@@ -38,6 +38,37 @@ export const systemApi = crud('/systems');
 export const issueApi = crud('/issues');
 export const meetingApi = crud('/meetings');
 export const categoryApi = crud('/categories');
+export const toolApi = crud('/tools');
+
+export const attachmentApi = {
+  list: (entity_type: string, entity_id: number) =>
+    client.get('/attachments', { params: { entity_type, entity_id } }),
+
+  /**
+   * Relative paths travel as a JSON array rather than repeated form fields:
+   * multipart list parsing differs between clients and can silently reorder,
+   * which would scramble a folder's structure.
+   */
+  upload: (entity_type: string, entity_id: number, files: File[], paths?: string[]) => {
+    const body = new FormData();
+    body.append('entity_type', entity_type);
+    body.append('entity_id', String(entity_id));
+    files.forEach((f) => body.append('files', f));
+    if (paths?.length) body.append('paths', JSON.stringify(paths));
+    return client.post('/attachments', body, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  remove: (id: number) => client.delete(`/attachments/${id}`),
+  downloadUrl: (id: number) => `/api/attachments/${id}/download`,
+  inlineUrl: (id: number) => `/api/attachments/${id}/inline`,
+};
+
+export const toolFiles = {
+  manifest: (id: number) => client.get(`/tools/${id}/manifest`),
+  entryUrl: (id: number, entry: string) => `/api/tools/${id}/serve/${entry}`,
+};
 
 export const dashboardApi = {
   getStats: () => client.get('/dashboard'),

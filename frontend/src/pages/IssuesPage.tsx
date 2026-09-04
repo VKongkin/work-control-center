@@ -33,7 +33,7 @@ export default function IssuesPage() {
   return (
     <CrudPage<Issue>
       title="Issues" singular="Issue" api={issueApi}
-      fields={fields} columns={columns}
+      fields={fields} columns={columns} attachAs="issue"
       labelKey="title"
       subtitle="Incidents and problems under investigation"
       emptyHint="Log incidents here to keep root cause and resolution together."

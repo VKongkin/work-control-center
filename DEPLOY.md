@@ -104,6 +104,10 @@ docker run --rm \
   alpine sh -c 'cd /from && cp -a . /to'
 ```
 
+Uploaded files - task attachments and the files making up a tool - are stored
+in the database, so `make backup` captures them along with everything else. The
+limit is 10 MB per file.
+
 ### Before anything risky
 
 ```bash

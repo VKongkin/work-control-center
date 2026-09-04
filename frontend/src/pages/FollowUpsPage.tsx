@@ -6,11 +6,12 @@ import { FollowUp } from '../types';
 import { useResource, clean, toId } from '../hooks/useResource';
 import { useLookups } from '../hooks/useLookups';
 import { useForm } from '../hooks/useForm';
+import DetailView from '../components/DetailView';
 import {
   Badge, Button, ComboboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
   ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from '../components/ui';
-import { FOLLOWUP_STATUSES, WAITING_FOR_TYPES, fmtDate, isOverdue, toDateInput } from '../lib/constants';
+import { FOLLOWUP_STATUSES, WAITING_FOR_TYPES, fmtDate, isOverdue, labelFor, toDateInput } from '../lib/constants';
 import { maxLength, notBefore, required, saneDate } from '../lib/validators';
 
 const RULES = {
@@ -48,6 +49,7 @@ export default function FollowUpsPage() {
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<FollowUp | null>(null);
+  const [viewing, setViewing] = useState<FollowUp | null>(null);
   const [toDelete, setToDelete] = useState<FollowUp | null>(null);
   const form = useForm({ initial: blank, rules: RULES });
 
@@ -181,7 +183,7 @@ export default function FollowUpsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <button
-                        onClick={() => openEdit(f)}
+                        onClick={() => setViewing(f)}
                         className="text-left font-semibold text-slate-900 hover:text-blue-700"
                       >
                         {f.title}
@@ -302,6 +304,30 @@ export default function FollowUpsPage() {
           <TextAreaField {...fx('notes')} label="Notes" value={form.values.notes} onChange={set('notes')} className="sm:col-span-2" />
         </div>
       </Modal>
+
+      {viewing && (
+        <DetailView
+          open
+          onClose={() => setViewing(null)}
+          title={viewing.title}
+          badges={<Badge value={viewing.status} />}
+          rows={[
+            { label: 'Description', value: viewing.description, wide: true },
+            { label: 'Waiting for', value: labelFor(viewing.waiting_for_type) },
+            { label: 'Waiting on', value: waitingOn(viewing) },
+            { label: 'Requested on', value: fmtDate(viewing.requested_date) },
+            { label: 'Expected by', value: fmtDate(viewing.expected_date) },
+            { label: 'Follow up on', value: fmtDate(viewing.follow_up_date) },
+            { label: 'Last contact', value: fmtDate(viewing.last_contact_date) },
+            { label: 'Next action', value: viewing.next_action, wide: true },
+            { label: 'Notes', value: viewing.notes, wide: true },
+          ].map((r) => (r.value === '—' ? { ...r, value: null } : r))}
+          entityType="followup"
+          entityId={viewing.id}
+          onEdit={() => { const f = viewing; setViewing(null); openEdit(f); }}
+          onDelete={() => { const f = viewing; setViewing(null); setToDelete(f); }}
+        />
+      )}
 
       <ConfirmDialog
         open={!!toDelete}
