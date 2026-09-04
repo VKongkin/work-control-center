@@ -133,6 +133,55 @@ export interface Meeting {
   notes?: string | null;
   decisions?: string | null;
   primary_contact_id?: number | null;
+
+  // Calendar detail. `source` is "WCC" for a meeting created here, otherwise
+  // the provider it was synced from - which decides whether it can be deleted.
+  source?: string | null;
+  external_id?: string | null;
+  connection_id?: number | null;
+  ends_at?: string | null;
+  organizer?: string | null;
+  location?: string | null;
+  is_online?: boolean | null;
+  join_url?: string | null;
+  is_cancelled?: boolean | null;
+  last_synced_at?: string | null;
+  /** Fields you have edited by hand; sync leaves these alone. */
+  locally_edited?: string[] | null;
+}
+
+export interface CalendarConnection {
+  id: number;
+  provider: 'microsoft' | 'ics';
+  display_name: string;
+  tenant_id?: string | null;
+  client_id?: string | null;
+  account?: string | null;
+  ics_url?: string | null;
+  days_back?: number | null;
+  days_ahead?: number | null;
+  enabled?: boolean | null;
+  status?: 'not_connected' | 'connected' | 'error' | null;
+  last_error?: string | null;
+  last_sync_at?: string | null;
+  last_sync_summary?: string | null;
+}
+
+export interface DeviceCode {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+  message?: string | null;
+}
+
+export interface SyncSummary {
+  created: number;
+  updated: number;
+  unchanged: number;
+  protected: number;
+  cancelled: number;
 }
 
 export interface Category {

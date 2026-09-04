@@ -5,7 +5,7 @@ import { Tool } from '../types';
 import { MUTATION_EVENT } from '../hooks/useResource';
 import {
   Home, Inbox, CheckSquare, Clock, BarChart3, AlertCircle, Users, Building,
-  Package, Server, Bug, CalendarDays, Tag, Search, X, Wrench, Star,
+  Package, Server, Bug, CalendarDays, Tag, Search, X, Wrench, Star, CalendarRange,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -31,6 +31,12 @@ const GROUPS = [
       { icon: BarChart3, label: 'Projects', to: '/projects' },
       { icon: Bug, label: 'Issues', to: '/issues' },
       { icon: CalendarDays, label: 'Meetings', to: '/meetings' },
+    ],
+  },
+  {
+    label: 'Setup',
+    items: [
+      { icon: CalendarRange, label: 'Calendars', to: '/calendars' },
     ],
   },
   {

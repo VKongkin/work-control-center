@@ -48,6 +48,17 @@ export function useResource<T extends { id: number }>(
     refresh();
   }, [refresh]);
 
+  // Something outside this page changed these records - a calendar sync, say.
+  // Without this the table would keep showing the pre-sync list until the user
+  // reloaded, which is exactly the stale-data problem we set out to remove.
+  useEffect(() => {
+    const onRefresh = (e: Event) => {
+      if ((e as CustomEvent<{ label?: string }>).detail?.label === label) refresh();
+    };
+    window.addEventListener(REFRESH_EVENT, onRefresh);
+    return () => window.removeEventListener(REFRESH_EVENT, onRefresh);
+  }, [label, refresh]);
+
   const create = useCallback(
     async (data: Partial<T>): Promise<true | string> => {
       setSaving(true);
@@ -123,6 +134,19 @@ export const MUTATION_EVENT = 'wcc:mutated';
 
 function announce(label: string) {
   window.dispatchEvent(new CustomEvent(MUTATION_EVENT, { detail: { label } }));
+}
+
+/**
+ * Ask any list of `label` to reload.
+ *
+ * Separate from MUTATION_EVENT on purpose: that one says "a record changed, so
+ * cached dropdowns are stale", and every list already refreshes itself after
+ * its own edits. This one is for changes made somewhere else entirely.
+ */
+export const REFRESH_EVENT = 'wcc:refresh';
+
+export function requestRefresh(label: string) {
+  window.dispatchEvent(new CustomEvent(REFRESH_EVENT, { detail: { label } }));
 }
 
 /** Strip '' -> null so empty form fields clear the column instead of failing validation. */

@@ -118,6 +118,30 @@ export function toDateInput(value?: string | null): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * ISO timestamp -> "2026-09-03T09:00" for <input type="datetime-local">.
+ * Built from the local parts rather than toISOString, which would shift the
+ * clock by the timezone offset and quietly move every meeting.
+ */
+export function toDateTimeInput(value?: string | null): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+         `T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Date plus time, for records where the time of day is the point. */
+export function fmtDateTime(value?: string | null): string {
+  if (!value) return '\u2014';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '\u2014';
+  return d.toLocaleString(undefined, {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 export function isOverdue(due?: string | null, status?: string): boolean {
   if (!due || status === 'COMPLETED' || status === 'CANCELLED') return false;
   const d = new Date(due);

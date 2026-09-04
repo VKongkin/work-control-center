@@ -305,7 +305,18 @@ export function ComboboxField({
         onChange={(v: string | null) => onChange(v ?? '')}
         onClose={() => setQuery('')}
       >
-        <div className="relative">
+        {({ open: listOpen }) => (
+        <div
+          className="relative"
+          /**
+           * Escape while the list is open should close only the list. Left to
+           * bubble it also reaches the dialog, so one keypress meant to dismiss
+           * a dropdown would throw away the whole half-filled form.
+           */
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && listOpen) e.stopPropagation();
+          }}
+        >
           <ComboboxInput
             id={id}
             name={name}
@@ -358,6 +369,7 @@ export function ComboboxField({
             ))}
           </ComboboxOptions>
         </div>
+        )}
       </Combobox>
       <FieldNote error={error} hint={hint} id={id} />
     </div>
@@ -365,8 +377,8 @@ export function ComboboxField({
 }
 
 export function DateField({
-  label, value, onChange, className = '', name, error, hint, required, onBlur,
-}: BaseField & { value: string; onChange: (v: string) => void }) {
+  label, value, onChange, className = '', name, error, hint, required, onBlur, withTime,
+}: BaseField & { value: string; onChange: (v: string) => void; withTime?: boolean }) {
   const id = idFor(name, label);
   return (
     <div className={className}>
@@ -374,7 +386,9 @@ export function DateField({
       <input
         id={id}
         name={name}
-        type="date"
+        // A meeting at 09:00 that saves back as midnight is worse than useless,
+        // so anything carrying a time keeps one.
+        type={withTime ? 'datetime-local' : 'date'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}

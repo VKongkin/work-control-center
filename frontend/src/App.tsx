@@ -17,6 +17,7 @@ import SystemsPage from './pages/SystemsPage';
 import CategoriesPage from './pages/CategoriesPage';
 import ToolsPage from './pages/ToolsPage';
 import ToolRunPage from './pages/ToolRunPage';
+import CalendarSettingsPage from './pages/CalendarSettingsPage';
 import AlertsPage from './pages/AlertsPage';
 import SearchPage from './pages/SearchPage';
 
@@ -56,6 +57,7 @@ export default function App() {
                   <Route path="/categories" element={<CategoriesPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/tools/:id" element={<ToolRunPage />} />
+                  <Route path="/calendars" element={<CalendarSettingsPage />} />
                   <Route path="/alerts" element={<AlertsPage />} />
                   <Route path="/search" element={<SearchPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

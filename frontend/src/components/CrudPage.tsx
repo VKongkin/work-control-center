@@ -8,7 +8,7 @@ import {
   Badge, Button, CheckboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
   ComboboxField, ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from './ui';
-import { Option, fmtDate, labelFor, toDateInput } from '../lib/constants';
+import { Option, fmtDate, fmtDateTime, toDateInput, toDateTimeInput } from '../lib/constants';
 import { Rule, email, maxLength, phone, required, saneDate } from '../lib/validators';
 
 // Records the upload endpoint recognises. Directory entries are references,
@@ -21,7 +21,7 @@ type LookupKey = 'people' | 'departments' | 'vendors' | 'systems' | 'projects' |
 export interface FieldDef {
   key: string;
   label: string;
-  type: 'text' | 'email' | 'tel' | 'textarea' | 'select' | 'date' | 'checkbox' | 'lookup';
+  type: 'text' | 'email' | 'tel' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'lookup';
   /** static options for `select` */
   options?: Option[];
   /** which lookup list to draw from for `lookup` */
@@ -63,11 +63,26 @@ interface Props<T> {
   deleteNote?: string;
   /** entity_type used for file uploads; omit for records that carry no files */
   attachAs?: string;
+  /**
+   * Return a reason this row must not be deleted, or null to allow it. A
+   * refusal is shown on the disabled button rather than left for the server to
+   * discover after the click.
+   */
+  blockDelete?: (row: T) => string | null;
+  /** Extra buttons beside "New …" in the page header. */
+  headerExtra?: ReactNode;
+  /** Rows appended to the detail view, for fields the form does not carry. */
+  extraDetailRows?: (row: T, lk: Lookups) => DetailRow[];
+  /** Small badges shown beside a row's title and at the top of its detail view. */
+  rowBadges?: (row: T) => ReactNode;
+  /** Fields to leave out of the form for this particular row. */
+  hideFields?: (row: T | null) => string[];
 }
 
 export default function CrudPage<T extends { id: number }>({
   title, subtitle, singular, api, fields, columns, labelKey = 'name' as any, emptyHint,
-  archivable, deleteNote, attachAs,
+  archivable, deleteNote, attachAs, blockDelete, headerExtra, extraDetailRows, rowBadges,
+  hideFields,
 }: Props<T>) {
   const [showArchived, setShowArchived] = useState(false);
   const params = useMemo(
@@ -106,7 +121,7 @@ export default function CrudPage<T extends { id: number }>({
       if (f.required) list.push(required(f.label));
       if (f.type === 'email') list.push(email);
       if (f.type === 'tel') list.push(phone);
-      if (f.type === 'date') list.push(saneDate);
+      if (f.type === 'date' || f.type === 'datetime') list.push(saneDate);
       if (f.type === 'text' || f.type === 'email') list.push(maxLength(255, f.label));
       if (f.rules) list.push(...f.rules);
       if (list.length) r[f.key] = list;
@@ -129,6 +144,7 @@ export default function CrudPage<T extends { id: number }>({
       const v = (row as any)[f.key];
       if (f.type === 'checkbox') o[f.key] = v ?? true;
       else if (f.type === 'date') o[f.key] = toDateInput(v);
+      else if (f.type === 'datetime') o[f.key] = toDateTimeInput(v);
       else if (f.type === 'lookup') o[f.key] = v ? String(v) : '';
       // A stored null in a non-nullable enum would be sent straight back as
       // null and rejected, so fall back to a valid choice.
@@ -164,17 +180,19 @@ export default function CrudPage<T extends { id: number }>({
 
   /** The same field definitions that drive the form also describe the record. */
   function detailRows(row: T): DetailRow[] {
-    return fields.map((f) => {
+    const rows: DetailRow[] = fields.map((f) => {
       const raw = (row as any)[f.key];
       let value: any = raw;
       if (f.type === 'lookup') value = lk.nameOf(f.lookup!, raw);
       else if (f.type === 'date') value = fmtDate(raw);
+      else if (f.type === 'datetime') value = fmtDateTime(raw);
       else if (f.type === 'checkbox') value = raw ? 'Active' : 'Archived';
       else if (f.type === 'select') value = <Badge value={raw} />;
       else if (raw === null || raw === undefined || raw === '') value = null;
       if (value === '—') value = null;
       return { label: f.label, value, wide: f.type === 'textarea' || f.full };
     });
+    return rows.concat(extraDetailRows ? extraDetailRows(row, lk) : []);
   }
 
   const optionsFor = (f: FieldDef): Option[] =>
@@ -209,6 +227,7 @@ export default function CrudPage<T extends { id: number }>({
                 Show archived
               </label>
             )}
+            {headerExtra}
             <Button variant="primary" onClick={openNew}>
               <Plus size={16} /> New {singular}
             </Button>
@@ -248,12 +267,15 @@ export default function CrudPage<T extends { id: number }>({
                     {columns.map((c, i) => (
                       <td key={c.header} className="px-4 py-3">
                         {i === 0 ? (
-                          <button
-                            onClick={() => setViewing(row)}
-                            className="text-left font-medium text-slate-900 hover:text-blue-700"
-                          >
-                            {cellValue(c, row)}
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => setViewing(row)}
+                              className="text-left font-medium text-slate-900 hover:text-blue-700"
+                            >
+                              {cellValue(c, row)}
+                            </button>
+                            {rowBadges?.(row)}
+                          </div>
                         ) : (
                           cellValue(c, row)
                         )}
@@ -268,7 +290,7 @@ export default function CrudPage<T extends { id: number }>({
                           <Button
                             variant="ghost" aria-label="Restore"
                             className="text-emerald-700 hover:bg-emerald-50"
-                            onClick={() => update(row.id, { active: true } as Partial<T>)}
+                            onClick={() => update(row.id, { active: true } as unknown as Partial<T>)}
                           >
                             <RotateCcw size={15} />
                           </Button>
@@ -276,7 +298,9 @@ export default function CrudPage<T extends { id: number }>({
                           <Button
                             variant="ghost" onClick={() => setToDelete(row)}
                             aria-label={archivable ? 'Archive' : 'Delete'}
-                            className="text-red-600 hover:bg-red-50"
+                            disabled={!!blockDelete?.(row)}
+                            title={blockDelete?.(row) ?? undefined}
+                            className="text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
                           >
                             {archivable ? <Archive size={15} /> : <Trash2 size={15} />}
                           </Button>
@@ -309,7 +333,7 @@ export default function CrudPage<T extends { id: number }>({
         <ErrorSummary errors={form.errorList} serverError={form.serverError} />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {fields.map((f) => {
+          {fields.filter((f) => !(hideFields?.(editing) ?? []).includes(f.key)).map((f) => {
             const set = (v: any) => form.setField(f.key, v);
             const shared = {
               key: f.key,
@@ -328,8 +352,8 @@ export default function CrudPage<T extends { id: number }>({
               return <ComboboxField {...shared} value={value} onChange={set} options={optionsFor(f)} />;
             if (f.type === 'select')
               return <SelectField {...shared} value={value} onChange={set} options={optionsFor(f)} />;
-            if (f.type === 'date')
-              return <DateField {...shared} value={value} onChange={set} />;
+            if (f.type === 'date' || f.type === 'datetime')
+              return <DateField {...shared} value={value} onChange={set} withTime={f.type === 'datetime'} />;
             if (f.type === 'checkbox')
               return <CheckboxField key={f.key} label={f.label} checked={!!form.values[f.key]} onChange={set} />;
             return <TextField {...shared} type={f.type} value={value} onChange={set} placeholder={f.placeholder} />;
@@ -343,10 +367,12 @@ export default function CrudPage<T extends { id: number }>({
           onClose={() => setViewing(null)}
           title={String((viewing as any)[labelKey] ?? singular)}
           rows={detailRows(viewing)}
+          badges={rowBadges?.(viewing)}
           entityType={attachAs && ATTACHABLE.has(attachAs) ? attachAs : undefined}
           entityId={viewing.id}
           onEdit={() => { const row = viewing; setViewing(null); openEdit(row); }}
           onDelete={() => { const row = viewing; setViewing(null); setToDelete(row); }}
+          deleteBlockedReason={blockDelete?.(viewing) ?? null}
           deleteLabel={archivable ? 'Archive' : 'Delete'}
         />
       )}

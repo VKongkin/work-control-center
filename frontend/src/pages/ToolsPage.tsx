@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   Plus, Play, Pencil, Trash2, Star, Wrench, FileWarning, Files,
 } from 'lucide-react';
-import { apiError, toolApi, toolFiles } from '../api/client';
+import { toolApi, toolFiles } from '../api/client';
 import { Tool, ToolManifest } from '../types';
 import { useResource, clean } from '../hooks/useResource';
 import { useForm } from '../hooks/useForm';

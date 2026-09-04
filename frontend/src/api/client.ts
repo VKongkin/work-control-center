@@ -1,4 +1,8 @@
 import axios from 'axios';
+import type {
+  Task, FollowUp, Project, Person, Department, Vendor, SystemRecord, Issue, Meeting,
+  Category, Tool, CalendarConnection,
+} from '../types';
 
 const client = axios.create({
   baseURL: '/api',
@@ -28,17 +32,17 @@ function crud<T>(path: string) {
   };
 }
 
-export const taskApi = crud('/tasks');
-export const followupApi = crud('/followups');
-export const projectApi = crud('/projects');
-export const peopleApi = crud('/people');
-export const departmentApi = crud('/departments');
-export const vendorApi = crud('/vendors');
-export const systemApi = crud('/systems');
-export const issueApi = crud('/issues');
-export const meetingApi = crud('/meetings');
-export const categoryApi = crud('/categories');
-export const toolApi = crud('/tools');
+export const taskApi = crud<Task>('/tasks');
+export const followupApi = crud<FollowUp>('/followups');
+export const projectApi = crud<Project>('/projects');
+export const peopleApi = crud<Person>('/people');
+export const departmentApi = crud<Department>('/departments');
+export const vendorApi = crud<Vendor>('/vendors');
+export const systemApi = crud<SystemRecord>('/systems');
+export const issueApi = crud<Issue>('/issues');
+export const meetingApi = crud<Meeting>('/meetings');
+export const categoryApi = crud<Category>('/categories');
+export const toolApi = crud<Tool>('/tools');
 
 export const attachmentApi = {
   list: (entity_type: string, entity_id: number) =>
@@ -63,6 +67,23 @@ export const attachmentApi = {
   remove: (id: number) => client.delete(`/attachments/${id}`),
   downloadUrl: (id: number) => `/api/attachments/${id}/download`,
   inlineUrl: (id: number) => `/api/attachments/${id}/inline`,
+};
+
+export const calendarApi = {
+  ...crud<CalendarConnection>('/calendar/connections'),
+  test: (id: number) => client.post(`/calendar/connections/${id}/test`),
+  sync: (id: number) => client.post(`/calendar/connections/${id}/sync`),
+  syncAll: () => client.post('/calendar/sync'),
+  beginSignIn: (id: number) => client.post(`/calendar/connections/${id}/connect/device`),
+  pollSignIn: (id: number, device_code: string) =>
+    client.post(`/calendar/connections/${id}/connect/poll`, { device_code }),
+  signOut: (id: number) => client.post(`/calendar/connections/${id}/disconnect`),
+};
+
+/** Let a hand-edited field start tracking the calendar again. */
+export const meetingSync = {
+  unlock: (id: number, field: string) =>
+    client.post(`/meetings/${id}/unlock`, null, { params: { field } }),
 };
 
 export const toolFiles = {

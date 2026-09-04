@@ -20,6 +20,7 @@ export interface DetailRow {
 export default function DetailView({
   open, onClose, title, subtitle, badges, rows, entityType, entityId,
   onEdit, onDelete, editLabel = 'Edit', deleteLabel = 'Delete', extra,
+  deleteBlockedReason = null,
 }: {
   open: boolean;
   onClose: () => void;
@@ -35,6 +36,8 @@ export default function DetailView({
   editLabel?: string;
   deleteLabel?: string;
   extra?: ReactNode;
+  /** Why this record cannot be deleted; the button explains rather than fails. */
+  deleteBlockedReason?: string | null;
 }) {
   const shown = rows.filter((r) => r.value !== null && r.value !== undefined && r.value !== '');
 
@@ -47,7 +50,13 @@ export default function DetailView({
       footer={
         <>
           {onDelete && (
-            <Button variant="ghost" onClick={onDelete} className="mr-auto text-red-600 hover:bg-red-50">
+            <Button
+              variant="ghost"
+              onClick={onDelete}
+              disabled={!!deleteBlockedReason}
+              title={deleteBlockedReason ?? undefined}
+              className="mr-auto text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+            >
               <Trash2 size={15} /> {deleteLabel}
             </Button>
           )}

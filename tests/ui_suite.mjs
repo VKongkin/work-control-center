@@ -35,12 +35,16 @@ const comboOpen = async (id) => {
 const comboLabels = async (id) => {
   await comboOpen(id);
   const t = await page.locator('[role="option"]').allTextContents();
-  // Escape is safe only while the list is genuinely open - otherwise it bubbles
-  // to the dialog and closes the whole form
-  if ((await page.locator('[role="option"]').count()) > 0) {
+  // Escape is safe only while the list is genuinely open. Counting the options
+  // is not good enough: the list stays mounted through its closing transition,
+  // so a count taken then sends an Escape that reaches the dialog instead and
+  // closes the whole form. aria-expanded reflects the real state.
+  const expanded = await page.locator(`#${id}`).getAttribute('aria-expanded');
+  if (expanded === 'true') {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(250);
   }
+  await page.waitForTimeout(150);
   return t.map(x => x.trim());
 };
 const comboPick = async (id, { index, label } = {}) => {

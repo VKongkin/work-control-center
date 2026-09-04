@@ -12,6 +12,7 @@ from .categories import Category
 from .activity import Activity
 from .attachments import Attachment
 from .tools import Tool
+from .calendar import CalendarConnection, AppSecret
 
 __all__ = [
     "Task",
@@ -27,4 +28,6 @@ __all__ = [
     "Activity",
     "Attachment",
     "Tool",
+    "CalendarConnection",
+    "AppSecret",
 ]

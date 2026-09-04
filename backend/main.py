@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import routers and models
-from app.api import tasks, followups, projects, people, departments, vendors, systems, issues, meetings, categories, dashboard, alerts, search, attachments, tools
+from app.api import tasks, followups, projects, people, departments, vendors, systems, issues, meetings, categories, dashboard, alerts, search, attachments, tools, calendar
 from app.database import engine, Base, init_db
 from app.validation import register_error_handlers
 
@@ -59,6 +59,7 @@ app.include_router(meetings.router, prefix="/api/meetings", tags=["Meetings"])
 app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
 app.include_router(attachments.router, prefix="/api/attachments", tags=["Attachments"])
 app.include_router(tools.router, prefix="/api/tools", tags=["Tools"])
+app.include_router(calendar.router, prefix="/api/calendar", tags=["Calendar"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(search.router, prefix="/api/search", tags=["Search"])
 

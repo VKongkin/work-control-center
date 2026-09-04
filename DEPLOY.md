@@ -108,6 +108,11 @@ Uploaded files - task attachments and the files making up a tool - are stored
 in the database, so `make backup` captures them along with everything else. The
 limit is 10 MB per file.
 
+Calendar connections are in the database too, including the encrypted Microsoft
+sign-in token. A restore onto a machine with a different `WCC_SECRET_KEY` cannot
+read that token, so you would simply sign in again; nothing else is affected.
+See `CALENDAR.md`.
+
 ### Before anything risky
 
 ```bash
@@ -116,6 +121,22 @@ make backup     # writes wcc-backup.sql
 
 Worth doing before upgrading Postgres major versions, which is the one change
 an existing volume cannot survive on its own.
+
+## Upgrading an existing install
+
+New columns are added to your existing database automatically on startup. The
+backend compares the tables it finds against the ones it expects and issues the
+missing `ADD COLUMN`s — additive only: nothing is dropped, renamed or retyped,
+so an upgrade cannot cost you data.
+
+```bash
+docker compose pull && docker compose up -d
+docker compose logs backend | grep "Schema updated"
+```
+
+This is what lets `docker compose pull` be safe on a volume holding months of
+work. It is not a substitute for `make backup` before a Postgres **major**
+version change, which is a different kind of upgrade entirely.
 
 ## Choosing a version
 
