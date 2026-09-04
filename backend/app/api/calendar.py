@@ -5,7 +5,8 @@ department allows. Microsoft Graph is the better experience but needs an app
 registration in the company tenant; a published ICS URL needs nothing from
 anybody, and you can set it up yourself in Outlook in about a minute.
 """
-from datetime import datetime
+import json
+from datetime import datetime, time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import CalendarConnection, Meeting
 from app.partial import make_lenient, make_partial, merge
-from app.services import calendar_sync, graph, ics
+from app.services import calendar_sync, clock, graph, ics
 from app.services.secrets import encrypt
 from app.validation import Name, one_of
 
@@ -31,6 +32,7 @@ class ConnectionSchema(BaseModel):
     tenant_id: Optional[str] = None
     client_id: Optional[str] = None
     ics_url: Optional[str] = None
+    timezone: Optional[str] = None
     days_back: Optional[int] = 7
     days_ahead: Optional[int] = 60
     enabled: Optional[bool] = True
@@ -50,6 +52,7 @@ class ConnectionOut(BaseModel):
     client_id: Optional[str] = None
     account: Optional[str] = None
     ics_url: Optional[str] = None
+    timezone: Optional[str] = None
     days_back: Optional[int] = None
     days_ahead: Optional[int] = None
     enabled: Optional[bool] = None
@@ -81,6 +84,12 @@ def _validate(payload: ConnectionSchema) -> None:
         raise HTTPException(
             status_code=422,
             detail="Paste the published calendar (.ics) URL from Outlook.",
+        )
+    if payload.timezone and not clock.is_known(payload.timezone):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{payload.timezone!r} is not a timezone this server recognises. "
+                   "Use an IANA name such as Asia/Phnom_Penh.",
         )
 
 
@@ -128,12 +137,72 @@ def update_connection(connection_id: int, payload: ConnectionPartial,
         row.account = None
         row.status = "not_connected"
 
+    # Changing the zone changes what every already-stored time means, so the
+    # meetings are re-read in the new zone rather than left showing the old one.
+    moved = 0
+    if full.timezone != row.timezone:
+        moved = _reanchor(db, row, row.timezone, full.timezone)
+
     for key, value in full.dict(exclude={"id"}).items():
         setattr(row, key, value)
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
+    if moved:
+        row.last_sync_summary = json.dumps({"retimed": moved})
+        db.commit()
+        db.refresh(row)
     return row
+
+
+def _reanchor(db: Session, connection: CalendarConnection,
+              old_name: Optional[str], new_name: Optional[str]) -> int:
+    """Re-read this calendar's stored times as if the new zone had always applied.
+
+    Each time is anchored back to the instant it stood for under the old zone and
+    then read again in the new one, so a daylight-saving boundary inside the
+    range is handled per meeting rather than by one flat offset.
+    """
+    old_zone, new_zone = clock.resolve(old_name), clock.resolve(new_name)
+    if old_zone == new_zone:
+        return 0
+
+    moved = 0
+    rows = db.query(Meeting).filter(Meeting.connection_id == connection.id).all()
+    for meeting in rows:
+        # An all-day entry has no time of day, so there is nothing to re-read.
+        if _is_all_day(meeting):
+            continue
+        # A meeting whose time you fixed by hand is already the time you want.
+        protected = set(calendar_sync.edited_fields(meeting))
+        changed = False
+        for field in ("meeting_date", "ends_at"):
+            if field in protected:
+                continue
+            current = getattr(meeting, field, None)
+            shifted = clock.reinterpret(current, old_zone, new_zone)
+            if shifted is not None and shifted != current:
+                setattr(meeting, field, shifted)
+                changed = True
+        if changed:
+            moved += 1
+    return moved
+
+
+def _is_all_day(meeting: Meeting) -> bool:
+    """Whether this meeting occupies whole days rather than a time of day.
+
+    The stored flag is the answer for anything synced since it existed. Meetings
+    synced before then have no flag, so a midnight-to-midnight span stands in -
+    otherwise the first timezone change would drag every old holiday onto the
+    evening before.
+    """
+    if getattr(meeting, "all_day", False):
+        return True
+    start, end = meeting.meeting_date, meeting.ends_at
+    if start is None or start.time() != time(0, 0):
+        return False
+    return end is None or end.time() == time(0, 0)
 
 
 @router.delete("/connections/{connection_id}")

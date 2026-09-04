@@ -29,6 +29,11 @@ class CalendarConnection(Base):
     # ICS: the published calendar URL.
     ics_url = Column(Text, nullable=True)
 
+    # The zone whose wall clock these meetings should read in. Providers hand
+    # over UTC; a 10:30 meeting in Phnom Penh arrives as 03:30, and stored raw
+    # it would show as 03:30. IANA name, e.g. "Asia/Phnom_Penh".
+    timezone = Column(String(64), nullable=True)
+
     # How far either side of today to sync. Meetings outside this window are
     # left alone rather than deleted, so old records keep their notes.
     days_back = Column(Integer, default=7)

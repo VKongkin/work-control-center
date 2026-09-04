@@ -145,6 +145,7 @@ export interface Meeting {
   is_online?: boolean | null;
   join_url?: string | null;
   is_cancelled?: boolean | null;
+  all_day?: boolean | null;
   last_synced_at?: string | null;
   /** Fields you have edited by hand; sync leaves these alone. */
   locally_edited?: string[] | null;
@@ -158,6 +159,8 @@ export interface CalendarConnection {
   client_id?: string | null;
   account?: string | null;
   ics_url?: string | null;
+  /** IANA zone whose wall clock these meetings read in. */
+  timezone?: string | null;
   days_back?: number | null;
   days_ahead?: number | null;
   enabled?: boolean | null;

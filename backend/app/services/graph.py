@@ -103,7 +103,7 @@ def calendar_view(token: str, days_back: int, days_ahead: int) -> List[Dict[str,
     url = (
         f"{GRAPH}/me/calendarView"
         f"?startDateTime={start}&endDateTime={end}"
-        "&$select=id,subject,start,end,organizer,attendees,location,"
+        "&$select=id,subject,start,end,isAllDay,organizer,attendees,location,"
         "isOnlineMeeting,onlineMeeting,bodyPreview,isCancelled,seriesMasterId"
         "&$orderby=start/dateTime&$top=200"
     )
@@ -131,8 +131,10 @@ def to_meeting(event: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "external_id": event.get("id"),
         "title": event.get("subject") or "(no subject)",
+        # Aware UTC; calendar_sync converts to the calendar owner's wall clock.
         "meeting_date": _parse(event.get("start")),
         "ends_at": _parse(event.get("end")),
+        "all_day": bool(event.get("isAllDay")),
         "organizer": (event.get("organizer") or {}).get("emailAddress", {}).get("name"),
         "participants": ", ".join([a for a in attendees if a]) or None,
         "location": (event.get("location") or {}).get("displayName") or None,
@@ -153,9 +155,13 @@ def _parse(slot: Optional[Dict[str, Any]]) -> Optional[datetime]:
         head, frac = raw.split(".", 1)
         raw = f"{head}.{frac[:6]}"
     try:
-        return datetime.fromisoformat(raw)
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
         return None
+    # The request asks for UTC (Prefer: outlook.timezone), but Graph states that
+    # only in a sibling field - so the offset is attached here rather than left
+    # implicit for the next reader to guess at.
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _auth(token: str) -> Dict[str, str]:

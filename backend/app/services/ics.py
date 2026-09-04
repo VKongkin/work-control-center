@@ -114,7 +114,7 @@ def parse(text: str, days_back: int, days_ahead: int) -> List[Dict[str, Any]]:
             if ident not in seen:
                 out.append(_flatten(event, start, _aware(_value(event, "DTEND")), ident))
 
-    out.sort(key=lambda e: e["meeting_date"] or datetime.min)
+    out.sort(key=lambda e: e["meeting_date"] or datetime.min.replace(tzinfo=timezone.utc))
     return out
 
 
@@ -189,11 +189,17 @@ def _flatten(event, start, end, ident: Optional[str] = None) -> Dict[str, Any]:
         attendees = [attendees]
 
     join = _join_url(event)
+    raw_start = event.get("DTSTART")
     return {
         "external_id": ident or str(event.get("UID", "")) or f"ics::{start.isoformat()}",
         "title": str(event.get("SUMMARY", "")) or "(no subject)",
-        "meeting_date": _naive(start),
-        "ends_at": _naive(end),
+        # Times leave here as aware UTC. Turning them into the calendar owner's
+        # wall clock is one step, done once, in calendar_sync.
+        "meeting_date": start,
+        "ends_at": end,
+        # An all-day entry has no time of day to convert; shifting it would drag
+        # a holiday onto the evening before.
+        "all_day": raw_start is not None and not isinstance(getattr(raw_start, "dt", None), datetime),
         "organizer": _address(organizer),
         "participants": ", ".join(filter(None, (_address(a) for a in (attendees or [])))) or None,
         "location": str(event.get("LOCATION", "")) or None,
@@ -251,6 +257,3 @@ def _aware(value) -> Optional[datetime]:
     return None
 
 
-def _naive(value: Optional[datetime]) -> Optional[datetime]:
-    """Postgres columns here are timezone-naive UTC, so drop the tzinfo."""
-    return value.replace(tzinfo=None) if value else None

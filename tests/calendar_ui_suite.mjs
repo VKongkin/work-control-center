@@ -242,6 +242,88 @@ try {
   }
   check('test records removed', !(await bodyText()).includes('UI mine only'));
 
+  section('A browser in Phnom Penh sees Phnom Penh times');
+  // The whole point of the timezone work: run the browser at UTC+7, feed a
+  // 03:30Z meeting, and the page must read 10:30 AM.
+  const tzCtx = await browser.newContext({ timezoneId: 'Asia/Phnom_Penh',
+    viewport: { width: 1280, height: 900 } });
+  const tzPage = await tzCtx.newPage();
+  const tzDialog = () => tzPage.locator('[role="dialog"]');
+  try {
+    state.body = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:tzmorning@wcc-ui
+SUMMARY:UI morning meeting
+DTSTART:${z(new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), 3, 30)))}
+DTEND:${z(new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), 5, 0)))}
+END:VEVENT
+BEGIN:VEVENT
+UID:tzholiday@wcc-ui
+SUMMARY:UI public holiday
+DTSTART;VALUE=DATE:${z(base).slice(0, 8)}
+DTEND;VALUE=DATE:${z(plus(base, 864e5)).slice(0, 8)}
+END:VEVENT
+END:VCALENDAR
+`;
+    await tzPage.goto(BASE + '/calendars', { waitUntil: 'networkidle' });
+    await tzPage.waitForTimeout(500);
+    await tzPage.locator('button:has-text("Connect a calendar")').first().click();
+    await tzPage.waitForTimeout(600);
+    const tzField = tzDialog().locator('#f-timezone');
+    check('the form asks which clock to show times in', (await tzField.count()) === 1);
+    check('and defaults to the browser\'s own zone',
+      (await tzField.inputValue()) === 'Asia/Phnom Penh' ||
+      (await tzField.inputValue()) === 'Asia/Phnom_Penh',
+      await tzField.inputValue());
+
+    await tzDialog().locator('#f-display_name').fill('UI tz calendar');
+    await tzDialog().locator('#f-ics_url').fill(FEED_URL);
+    await tzDialog().locator('button:has-text("Add calendar")').click();
+    await tzPage.waitForTimeout(1300);
+    check('the card names the zone in use',
+      (await tzPage.locator('body').textContent()).includes('times in Asia/Phnom Penh'));
+
+    await tzPage.locator('button:has-text("Sync now")').first().click();
+    await tzPage.waitForTimeout(2500);
+    await tzPage.goto(BASE + '/meetings', { waitUntil: 'networkidle' });
+    await tzPage.waitForTimeout(700);
+
+    const morning = await tzPage.locator('tbody tr', { hasText: 'UI morning meeting' })
+      .first().textContent();
+    check('a 03:30Z meeting reads as 10:30 AM', /10:30/.test(morning), morning);
+    check('and not as 03:30', !/03:30/.test(morning), morning);
+
+    const holiday = await tzPage.locator('tbody tr', { hasText: 'UI public holiday' })
+      .first().textContent();
+    check('an all-day entry says so instead of showing a time',
+      holiday.includes('all day'), holiday);
+    check('and does not slide onto the previous evening',
+      !/11:00|12:00 AM/.test(holiday), holiday);
+
+    // clean up through this context so the main one is unaffected
+    await tzPage.goto(BASE + '/calendars', { waitUntil: 'networkidle' });
+    await tzPage.waitForTimeout(400);
+    await tzPage.locator('button[aria-label="Disconnect"]').first().click();
+    await tzPage.waitForTimeout(400);
+    await tzPage.locator('button:has-text("Disconnect")').last().click();
+    await tzPage.waitForTimeout(1400);
+    await tzPage.goto(BASE + '/meetings', { waitUntil: 'networkidle' });
+    await tzPage.waitForTimeout(600);
+    for (const title of ['UI morning meeting', 'UI public holiday']) {
+      for (;;) {
+        const row = tzPage.locator('tbody tr', { hasText: title }).first();
+        if ((await row.count()) === 0) break;
+        await row.locator('button[aria-label="Delete"]').click();
+        await tzPage.waitForTimeout(400);
+        await tzDialog().locator('button:has-text("Delete")').last().click();
+        await tzPage.waitForTimeout(900);
+      }
+    }
+  } finally {
+    await tzCtx.close();
+  }
+
   section('Console health');
   check('no uncaught console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {

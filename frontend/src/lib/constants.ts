@@ -142,6 +142,28 @@ export function fmtDateTime(value?: string | null): string {
   });
 }
 
+/** The zone this browser is set to, e.g. "Asia/Phnom_Penh". */
+export function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+/**
+ * Every IANA zone this browser knows, for the picker. Older browsers have no
+ * such list, so the caller falls back to typing a name.
+ */
+export function knownTimeZones(): string[] {
+  try {
+    const anyIntl = Intl as unknown as { supportedValuesOf?: (k: string) => string[] };
+    return anyIntl.supportedValuesOf?.('timeZone') ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export function isOverdue(due?: string | null, status?: string): boolean {
   if (!due || status === 'COMPLETED' || status === 'CANCELLED') return false;
   const d = new Date(due);

@@ -35,6 +35,10 @@ class Meeting(Base):
     organizer = Column(String(255), nullable=True)
     location = Column(String(512), nullable=True)
     is_online = Column(Boolean, default=False)
+    # An all-day entry has no time of day. Kept as a fact rather than inferred
+    # from a midnight timestamp, so converting between timezones can leave it
+    # alone instead of dragging a holiday onto the evening before.
+    all_day = Column(Boolean, default=False)
     join_url = Column(Text, nullable=True)
     is_cancelled = Column(Boolean, default=False)
     last_synced_at = Column(DateTime, nullable=True)

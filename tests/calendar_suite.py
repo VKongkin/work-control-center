@@ -334,6 +334,97 @@ def run():
         if str(m.get("title", "")).startswith(("Board (renamed", "Vendor catch-up")):
             api("DELETE", f"/api/meetings/{m['id']}")
 
+    # -- timezones ----------------------------------------------------------
+    section("Times arrive on your clock, not UTC")
+    # Outlook publishes in UTC. A 10:30 meeting in Phnom Penh is 03:30Z, and
+    # stored raw it read as 03:30 - the bug this section exists to prevent.
+    tz_feed = """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:tzmorning@wcc-test
+SUMMARY:TEST morning meeting
+DTSTART:{start}
+DTEND:{end}
+END:VEVENT
+BEGIN:VEVENT
+UID:tzholiday@wcc-test
+SUMMARY:TEST public holiday
+DTSTART;VALUE=DATE:{day}
+DTEND;VALUE=DATE:{next_day}
+END:VEVENT
+END:VCALENDAR
+""".format(
+        start=z(BASE.replace(hour=3, minute=30)),
+        end=z(BASE.replace(hour=5, minute=0)),
+        day=(BASE + timedelta(days=6)).strftime("%Y%m%d"),
+        next_day=(BASE + timedelta(days=7)).strftime("%Y%m%d"),
+    )
+    FEED["body"] = tz_feed
+
+    tz = api("POST", "/api/calendar/connections",
+             json={"provider": "ics", "display_name": "TEST phnom penh",
+                   "ics_url": FEED_URL, "timezone": "Asia/Phnom_Penh"}).json()
+    tzid = tz["id"]
+    check("The timezone is stored on the connection", tz["timezone"] == "Asia/Phnom_Penh",
+          str(tz.get("timezone")))
+    api("POST", f"/api/calendar/connections/{tzid}/sync")
+
+    rows = {m["title"]: m for m in meetings_for(tzid)}
+    morning = rows.get("TEST morning meeting", {})
+    check("03:30Z is stored as 10:30 local",
+          str(morning.get("meeting_date", "")).endswith("T10:30:00"),
+          str(morning.get("meeting_date")))
+    check("...and its end time moves with it",
+          str(morning.get("ends_at", "")).endswith("T12:00:00"), str(morning.get("ends_at")))
+
+    holiday = rows.get("TEST public holiday", {})
+    check("An all-day entry is marked as such", holiday.get("all_day") is True)
+    check("...and stays at midnight rather than sliding a day",
+          str(holiday.get("meeting_date", "")).endswith("T00:00:00"),
+          str(holiday.get("meeting_date")))
+
+    r = api("POST", f"/api/calendar/connections/{tzid}/sync")
+    check("Syncing again does not shift anything", r.json()["summary"]["updated"] == 0,
+          str(r.json()["summary"]))
+
+    # changing the zone must re-read what is already stored
+    api("PUT", f"/api/calendar/connections/{tzid}", json={"timezone": "Europe/London"})
+    rows = {m["title"]: m for m in meetings_for(tzid)}
+    check("Changing the zone re-reads stored meetings",
+          str(rows["TEST morning meeting"]["meeting_date"]).endswith("T04:30:00"),
+          str(rows["TEST morning meeting"]["meeting_date"]))
+    check("...and leaves all-day entries alone",
+          str(rows["TEST public holiday"]["meeting_date"]).endswith("T00:00:00"),
+          str(rows["TEST public holiday"]["meeting_date"]))
+
+    api("PUT", f"/api/calendar/connections/{tzid}", json={"timezone": "Asia/Phnom_Penh"})
+    rows = {m["title"]: m for m in meetings_for(tzid)}
+    check("Switching back restores the original time exactly",
+          str(rows["TEST morning meeting"]["meeting_date"]).endswith("T10:30:00"),
+          str(rows["TEST morning meeting"]["meeting_date"]))
+    r = api("POST", f"/api/calendar/connections/{tzid}/sync")
+    check("A sync after a zone change is a no-op, not a correction",
+          r.json()["summary"]["updated"] == 0, str(r.json()["summary"]))
+
+    # an edited time is yours, and a zone change must not move it either
+    mid = rows["TEST morning meeting"]["id"]
+    api("PUT", f"/api/meetings/{mid}", json={"meeting_date": "2026-12-01T08:15:00"})
+    api("PUT", f"/api/calendar/connections/{tzid}", json={"timezone": "Europe/London"})
+    after = api("GET", f"/api/meetings/{mid}").json()
+    check("A time you set by hand survives a zone change",
+          str(after["meeting_date"]).startswith("2026-12-01T08:15"), str(after["meeting_date"]))
+
+    r = api("PUT", f"/api/calendar/connections/{tzid}", json={"timezone": "Mars/Olympus"})
+    check("A zone name the server cannot load is refused", r.status_code == 422, r.text[:120])
+    r = api("GET", f"/api/calendar/connections/{tzid}")
+    check("...and the old zone is kept", r.json()["timezone"] == "Europe/London",
+          str(r.json().get("timezone")))
+
+    api("DELETE", f"/api/calendar/connections/{tzid}")
+    for m in api("GET", "/api/meetings", params={"limit": 500}).json():
+        if str(m.get("title", "")).startswith("TEST "):
+            api("DELETE", f"/api/meetings/{m['id']}")
+
     # -- microsoft path (mocked) -------------------------------------------
     section("Microsoft path (mocked Graph)")
     r = api("POST", "/api/calendar/connections",

@@ -34,6 +34,7 @@ class MeetingSchema(BaseModel):
     is_online: Optional[bool] = False
     join_url: Optional[str] = None
     is_cancelled: Optional[bool] = False
+    all_day: Optional[bool] = False
 
     class Config:
         from_attributes = True

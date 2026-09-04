@@ -1,6 +1,6 @@
 # Test suites
 
-Seven suites, 637 checks, run against a live application.
+Seven suites, 657 checks, run against a live application.
 
 | File | Checks | What it covers |
 |---|---|---|
@@ -9,8 +9,8 @@ Seven suites, 637 checks, run against a live application.
 | `followups_suite.mjs` | 96 | The follow-ups page in depth: all three waiting-for types, all five statuses, quick actions, the four dates, overdue signalling, alert rules, field-level update integrity |
 | `features_suite.mjs` | 42 | Detail views, file uploads to tasks, tool folders, the sandboxed tool runner, pinning |
 | `sync_suite.mjs` | 25 | Live data: a Directory record created, renamed, archived, restored or deleted must reach every form that references it without a page refresh |
-| `calendar_suite.py` | 60 | Calendar sync against a feed the suite serves itself: recurrence expansion, idempotence, the edit-protection rule, the delete guard, cancellation instead of deletion, disconnecting. The Microsoft path is checked as far as its own boundary — the Graph calls themselves are not exercised (see the note below) |
-| `calendar_ui_suite.mjs` | 41 | The same journey through the browser: connecting, testing, syncing, editing a synced meeting, releasing a field, disconnecting |
+| `calendar_suite.py` | 73 | Calendar sync against a feed the suite serves itself: recurrence expansion, idempotence, the edit-protection rule, the delete guard, cancellation instead of deletion, disconnecting, and timezone conversion (including changing a calendar's zone after the fact). The Microsoft path is checked as far as its own boundary — the Graph calls themselves are not exercised (see the note below) |
+| `calendar_ui_suite.mjs` | 48 | The same journey through the browser: connecting, testing, syncing, editing a synced meeting, releasing a field, disconnecting, and a browser running at UTC+7 to prove a 03:30Z meeting reads as 10:30 |
 
 ## Running them
 

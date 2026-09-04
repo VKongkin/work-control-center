@@ -10,13 +10,13 @@ rules hold, and they are the whole point of this module:
      cancelled, not removed, so your notes and decisions survive it.
 """
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models import CalendarConnection, Meeting
-from app.services import graph, ics
+from app.services import clock, graph, ics
 from app.services.secrets import decrypt
 
 # The fields sync owns. Anything not listed here - notes, decisions, the
@@ -31,6 +31,7 @@ SYNCED_FIELDS = (
     "is_online",
     "join_url",
     "is_cancelled",
+    "all_day",
 )
 
 
@@ -110,9 +111,30 @@ def fetch(db: Session, connection: CalendarConnection) -> List[Dict[str, Any]]:
 # applying
 # --------------------------------------------------------------------------
 
+def localise(connection: CalendarConnection, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Convert every provider time into the calendar's own wall clock.
+
+    Done in one place, after fetching and before anything is compared or stored,
+    so both providers and every later step see the same thing.
+    """
+    zone = clock.resolve(connection.timezone)
+    for row in rows:
+        row["all_day"] = bool(row.get("all_day"))
+        for field in ("meeting_date", "ends_at"):
+            value = row.get(field)
+            if value is None:
+                continue
+            # An all-day entry has no time of day to convert; shifting it would
+            # drag a holiday onto the evening before.
+            row[field] = (value.replace(tzinfo=None) if row["all_day"]
+                          else clock.to_wall(value, zone))
+    return rows
+
+
 def apply(db: Session, connection: CalendarConnection,
           rows: List[Dict[str, Any]]) -> Dict[str, int]:
     """Upsert the fetched occurrences, honouring every hand edit."""
+    localise(connection, rows)
     now = datetime.utcnow()
     summary = {"created": 0, "updated": 0, "unchanged": 0, "protected": 0, "cancelled": 0}
 
@@ -174,8 +196,11 @@ def apply(db: Session, connection: CalendarConnection,
     # Rule 2: gone from Outlook means cancelled, never deleted. Only meetings
     # inside the window we just fetched are considered - anything older simply
     # was not asked for, and must not be mistaken for a deletion.
-    window_start = now - timedelta(days=connection.days_back or 7)
-    window_end = now + timedelta(days=connection.days_ahead or 60)
+    # Meeting times are wall clock now, so the window has to be too - comparing
+    # them against a UTC "now" would misjudge both edges by the offset.
+    now_wall = clock.to_wall(datetime.now(timezone.utc), clock.resolve(connection.timezone))
+    window_start = now_wall - timedelta(days=connection.days_back or 7)
+    window_end = now_wall + timedelta(days=connection.days_ahead or 60)
     for ident, meeting in existing.items():
         if ident in seen or meeting.is_cancelled:
             continue

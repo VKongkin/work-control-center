@@ -106,6 +106,32 @@ into individual meetings — one per date in the sync window. Each is separate, 
 you can take notes on this week's without touching last week's. Cancelled single
 occurrences are skipped, and a moved or extended one keeps its own time.
 
+### Times and your timezone
+
+Outlook publishes meeting times in **UTC**. WCC converts them once, on the way
+in, to the clock you actually work by — set per calendar under
+**Show meeting times in**. A new calendar defaults to whatever zone your browser
+is set to, so this is usually right without being touched.
+
+If it is wrong, a 10:30 meeting shows up at the UTC time instead: in Phnom Penh
+(UTC+7) that reads as 03:30. The connection card says so plainly when no zone is
+set, and offers to fix it.
+
+**Changing the zone corrects meetings that are already stored.** Each one is
+anchored back to the instant it stood for and read again in the new zone, so a
+daylight-saving boundary in the middle of the range is handled per meeting
+rather than by one flat offset. Two things are deliberately left alone: a time
+you edited by hand (it is already the time you wanted), and an all-day entry
+(it has no time of day, and shifting it would drag a holiday onto the evening
+before).
+
+`WCC_TIMEZONE` sets the fallback for any calendar with no zone of its own.
+
+The stored times are wall-clock in that zone rather than UTC, which is what the
+rest of WCC does for every date it holds. The trade-off is that they stay
+anchored to that zone rather than following you abroad — for a work diary, that
+is usually what you want.
+
 ### The sync window
 
 Each connection syncs a window around today — 7 days back and 60 days ahead by
@@ -140,6 +166,8 @@ The connection card shows the error verbatim. The ones worth naming:
 | `AADSTS65001` | Consent has not been given for `Calendars.Read`. Sign in again, or ask for consent. |
 | `AADSTS50020` | The account signed in does not belong to that tenant. |
 | *The stored sign-in could not be read* | `WCC_SECRET_KEY` changed. Press **Sign in** again. |
+| Meetings are hours out | The calendar's timezone is unset or wrong. Fix **Show meeting times in**; meetings already synced are corrected with it. |
+| *not a timezone this server recognises* | Use an IANA name such as `Asia/Phnom_Penh`, not an abbreviation like `ICT`. |
 
 **Test** fetches without writing anything, so it is always safe to press while
 you are working out which link is the right one.

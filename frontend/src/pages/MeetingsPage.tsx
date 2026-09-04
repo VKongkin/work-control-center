@@ -24,7 +24,15 @@ const fields: FieldDef[] = [
 
 const columns: ColumnDef<Meeting>[] = [
   { header: 'Meeting', key: 'title' },
-  { header: 'When', cell: (r) => <span className="text-slate-600">{fmtDateTime(r.meeting_date)}</span> },
+  {
+    header: 'When',
+    // An all-day entry has no time of day; printing "12:00 AM" would invent one.
+    cell: (r) => (
+      <span className="text-slate-600">
+        {r.all_day ? `${fmtDate(r.meeting_date)} · all day` : fmtDateTime(r.meeting_date)}
+      </span>
+    ),
+  },
   {
     header: 'Where',
     cell: (r) =>
@@ -65,6 +73,11 @@ function SourceBadges({ meeting }: { meeting: Meeting }) {
           }
         >
           <CalendarCheck2 size={12} /> {meeting.source === 'microsoft' ? 'Outlook' : 'Calendar'}
+        </span>
+      )}
+      {meeting.all_day && (
+        <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
+          All day
         </span>
       )}
       {meeting.is_cancelled && (
@@ -215,6 +228,7 @@ export default function MeetingsPage() {
       emptyHint="Capture meetings so decisions do not live only in your head."
       headerExtra={header}
       rowBadges={(m) => <SourceBadges meeting={m} />}
+      hideFields={(m) => (m?.all_day ? ['ends_at'] : [])}
       extraDetailRows={extraDetailRows}
       blockDelete={(m) =>
         isSynced(m)

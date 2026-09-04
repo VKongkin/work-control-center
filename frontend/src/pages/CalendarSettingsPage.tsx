@@ -7,10 +7,16 @@ import { calendarApi, apiError } from '../api/client';
 import { requestRefresh } from '../hooks/useResource';
 import { useToast } from '../components/Toast';
 import {
-  Button, EmptyState, ErrorBanner, Modal, PageHeader, SelectField, Spinner, TextField,
+  Button, ComboboxField, EmptyState, ErrorBanner, Modal, PageHeader, SelectField,
+  Spinner, TextField,
 } from '../components/ui';
 import { CalendarConnection, DeviceCode } from '../types';
-import { fmtDate } from '../lib/constants';
+import { browserTimeZone, fmtDate, knownTimeZones } from '../lib/constants';
+
+// Offered as a searchable list where the browser can supply one. Falling back
+// to a plain field matters: an unrecognised name is refused by the server, so
+// a missing list must not leave the setting unreachable.
+const ZONES = knownTimeZones();
 
 const PROVIDERS = [
   { value: 'ics', label: 'Published calendar link (no IT approval needed)' },
@@ -23,6 +29,9 @@ const BLANK = {
   ics_url: '',
   tenant_id: '',
   client_id: '',
+  // Outlook publishes meetings in UTC. Defaulting to the zone this browser is
+  // already set to means a new calendar reads correctly without being asked.
+  timezone: browserTimeZone(),
   days_back: '7',
   days_ahead: '60',
 };
@@ -71,6 +80,7 @@ export default function CalendarSettingsPage() {
       ics_url: row.ics_url ?? '',
       tenant_id: row.tenant_id ?? '',
       client_id: row.client_id ?? '',
+      timezone: row.timezone || browserTimeZone(),
       days_back: String(row.days_back ?? 7),
       days_ahead: String(row.days_ahead ?? 60),
     });
@@ -84,6 +94,7 @@ export default function CalendarSettingsPage() {
     const payload: any = {
       provider: form.provider,
       display_name: form.display_name.trim(),
+      timezone: form.timezone.trim() || null,
       days_back: Number(form.days_back) || 7,
       days_ahead: Number(form.days_ahead) || 60,
     };
@@ -297,6 +308,24 @@ export default function CalendarSettingsPage() {
             </>
           )}
 
+          {ZONES.length > 0 ? (
+            <ComboboxField
+              name="timezone" label="Show meeting times in" className="sm:col-span-2"
+              value={form.timezone}
+              onChange={(v: string) => setForm({ ...form, timezone: v })}
+              options={ZONES.map((z) => ({ value: z, label: z.replace(/_/g, ' ') }))}
+              hint="Outlook sends times in UTC. This is the clock they are converted to."
+            />
+          ) : (
+            <TextField
+              name="timezone" label="Show meeting times in" className="sm:col-span-2"
+              value={form.timezone}
+              onChange={(v: string) => setForm({ ...form, timezone: v })}
+              placeholder="Asia/Phnom_Penh"
+              hint="Outlook sends times in UTC. This is the clock they are converted to."
+            />
+          )}
+
           <TextField
             name="days_back" label="Sync from (days back)"
             value={form.days_back}
@@ -384,6 +413,7 @@ function ConnectionCard({
               : 'Never synced'}
             {' · '}
             {row.days_back ?? 7} days back, {row.days_ahead ?? 60} ahead
+            {row.timezone ? ` · times in ${row.timezone.replace(/_/g, ' ')}` : ''}
           </p>
         </div>
 
@@ -413,6 +443,18 @@ function ConnectionCard({
         </div>
       </div>
 
+      {!row.timezone && new Date().getTimezoneOffset() !== 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+          <AlertTriangle size={16} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            No timezone set, so times are being shown as UTC — a 10:30 meeting will
+            read as {utcExample()}. Set it to {browserTimeZone().replace(/_/g, ' ')} and the
+            meetings already synced are corrected too.
+          </span>
+          <Button onClick={onEdit} disabled={busy}>Set timezone</Button>
+        </div>
+      )}
+
       {row.status === 'error' && row.last_error && (
         <div className="mt-4 flex gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-800 ring-1 ring-inset ring-red-200">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
@@ -441,6 +483,18 @@ function ConnectionCard({
       )}
     </div>
   );
+}
+
+/**
+ * What a 10:30 meeting reads as when nothing converts it: 10:30 in UTC terms.
+ * getTimezoneOffset is minutes behind UTC, so +07:00 reports -420 and 10:30
+ * becomes 03:30 - the symptom this warning is about.
+ */
+function utcExample(): string {
+  const local = new Date();
+  local.setHours(10, 30, 0, 0);
+  const asUtc = new Date(local.getTime() + local.getTimezoneOffset() * 60000);
+  return asUtc.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
 function StatusPill({ status, needsSignIn }: { status?: string | null; needsSignIn: boolean }) {
