@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarCheck2, Lock, Video, RefreshCw, CalendarRange } from 'lucide-react';
 import CrudPage, { ColumnDef, FieldDef } from '../components/CrudPage';
 import { DetailRow } from '../components/DetailView';
 import { calendarApi, meetingApi, meetingSync, apiError } from '../api/client';
 import { requestRefresh } from '../hooks/useResource';
+import { useCalendarWatch } from '../hooks/useCalendarWatch';
 import { useToast } from '../components/Toast';
 import { Button } from '../components/ui';
-import { CalendarConnection, Meeting, SyncSummary } from '../types';
+import { Meeting, SyncSummary } from '../types';
 import { fmtDate, fmtDateTime } from '../lib/constants';
 
 const fields: FieldDef[] = [
@@ -99,15 +100,18 @@ function SourceBadges({ meeting }: { meeting: Meeting }) {
 
 export default function MeetingsPage() {
   const toast = useToast();
-  const [connections, setConnections] = useState<CalendarConnection[]>([]);
   const [syncing, setSyncing] = useState(false);
 
-  useEffect(() => {
-    calendarApi
-      .getAll()
-      .then((r) => setConnections(r.data as CalendarConnection[]))
-      .catch(() => setConnections([]));
-  }, []);
+  // The server syncs on its own schedule, so the list has to notice a refresh
+  // that nobody on this page asked for.
+  const { connections, refresh: refreshConnections } = useCalendarWatch((changed) => {
+    const parts = [
+      changed.created && `${changed.created} new`,
+      changed.updated && `${changed.updated} updated`,
+      changed.cancelled && `${changed.cancelled} cancelled`,
+    ].filter(Boolean);
+    if (parts.length) toast.success(`Calendar synced: ${parts.join(', ')}`);
+  });
 
   async function syncNow() {
     setSyncing(true);
@@ -132,8 +136,7 @@ export default function MeetingsPage() {
         toast.success(parts.length ? `Synced: ${parts.join(', ')}` : 'Already up to date');
       }
       requestRefresh('Meeting');
-      const fresh = await calendarApi.getAll();
-      setConnections(fresh.data as CalendarConnection[]);
+      await refreshConnections();
     } catch (err) {
       toast.error(apiError(err));
     } finally {

@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import http from 'node:http';
 
 const BASE = process.env.WCC_URL ?? 'http://127.0.0.1:4173';
+const API = process.env.WCC_API ?? 'http://127.0.0.1:8012';
 const FEED_PORT = Number(process.env.WCC_UI_FEED_PORT ?? 4898);
 
 let passed = 0, failed = 0;
@@ -77,6 +78,14 @@ try {
     void card;
   }
 
+  // A previous run that failed part-way can leave meetings behind, and this
+  // suite asserts on what is absent as well as what is present.
+  for (const m of await (await fetch(`${API}/api/meetings?limit=500`)).json()) {
+    if (/^(Weekly Change Board|Board \(renamed upstream\)|UI mine only|Arrived while you were looking|UI morning meeting|UI public holiday)/.test(m.title)) {
+      await fetch(`${API}/api/meetings/${m.id}`, { method: 'DELETE' });
+    }
+  }
+
   section('The Calendars page');
   check('reachable from the sidebar',
     (await page.locator('a:has-text("Calendars")').count()) > 0);
@@ -128,7 +137,12 @@ try {
   await page.locator('button:has-text("Sync now")').first().click();
   await page.waitForTimeout(2500);
   const afterSync = await bodyText();
-  check('reports what changed', afterSync.includes('Synced: 3 new'));
+  // A newly added calendar is due at once, so the background scheduler may well
+  // have synced it before this click - which is the whole point of automatic
+  // syncing. Either message is correct; what must be true is that it synced.
+  check('reports what changed',
+    afterSync.includes('Synced: 3 new') || afterSync.includes('Already up to date'),
+    afterSync.slice(0, 0));
   check('the card records the last sync', !afterSync.includes('Never synced'));
 
   section('Synced meetings on the Meetings page');
@@ -203,6 +217,44 @@ try {
     !(await page.locator('tbody tr', { hasText: 'Board (renamed upstream)' })
       .first().textContent()).includes('kept'));
 
+  section('The page notices a sync it did not start');
+  // Automatic syncing happens in the backend, so the list has to pick up a
+  // refresh nobody on this page asked for - the stale-data complaint that
+  // started all of this.
+  await go('/calendars');
+  const conn = (await (await fetch(`${API}/api/calendar/connections`)).json())
+    .find((c) => c.display_name === 'UI test calendar');
+  check('the connection is scheduled', conn?.auto_sync === true, JSON.stringify(conn?.auto_sync));
+  check('and reports when it next runs', typeof conn?.next_sync_in_seconds === 'number',
+    String(conn?.next_sync_in_seconds));
+  check('the card shows the schedule',
+    (await bodyText()).includes('Syncs every 30 min'), '');
+
+  await go('/meetings');
+  const beforeCount = await page.locator('tbody tr').count();
+  // a new meeting appears upstream, and the server syncs it - not the page
+  state.body = feed('Board (renamed upstream)').replace('END:VCALENDAR', `BEGIN:VEVENT
+UID:arrived@wcc-test
+SUMMARY:Arrived while you were looking
+DTSTART:${z(plus(base, 3 * 864e5))}
+DTEND:${z(plus(base, 3 * 864e5 + 36e5))}
+LOCATION:Room 1.01
+END:VEVENT
+END:VCALENDAR`);
+  await fetch(`${API}/api/calendar/connections/${conn.id}/sync`, { method: 'POST' });
+
+  check('the page does not show it yet',
+    !(await bodyText()).includes('Arrived while you were looking'));
+
+  // coming back to the tab is one of the moments the page re-checks
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForTimeout(2500);
+  check('it appears without a manual refresh',
+    (await bodyText()).includes('Arrived while you were looking'),
+    `rows before ${beforeCount}, now ${await page.locator('tbody tr').count()}`);
+  check('and the page says what changed',
+    (await bodyText()).includes('Calendar synced'), '');
+
   section('A meeting you create yourself stays yours');
   await page.locator('button:has-text("New Meeting")').first().click();
   await page.waitForTimeout(500);
@@ -230,7 +282,8 @@ try {
     !(await orphan.locator('button[aria-label="Delete"]').isDisabled()));
 
   section('Cleanup');
-  for (const title of ['Board (renamed upstream)', 'UI mine only']) {
+  for (const title of ['Board (renamed upstream)', 'UI mine only',
+                       'Arrived while you were looking']) {
     for (;;) {
       const row = page.locator('tbody tr', { hasText: title }).first();
       if ((await row.count()) === 0) break;

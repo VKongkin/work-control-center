@@ -143,6 +143,27 @@ export function fmtDateTime(value?: string | null): string {
 }
 
 /** The zone this browser is set to, e.g. "Asia/Phnom_Penh". */
+/** "in 12 min" / "in 2 hours" / "any moment now", from a plain second count. */
+export function fmtCountdown(seconds?: number | null): string {
+  if (seconds === null || seconds === undefined) return '';
+  if (seconds <= 60) return 'any moment now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `in ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `in ${hours} hour${hours === 1 ? '' : 's'}`;
+  const days = Math.round(hours / 24);
+  return `in ${days} day${days === 1 ? '' : 's'}`;
+}
+
+/** "every 30 min" / "every 2 hours" / "every day", for an interval in minutes. */
+export function fmtInterval(minutes?: number | null): string {
+  const m = minutes ?? 30;
+  if (m < 60) return `every ${m} min`;
+  if (m % 1440 === 0) return m === 1440 ? 'every day' : `every ${m / 1440} days`;
+  const hours = m / 60;
+  return `every ${hours % 1 === 0 ? hours : hours.toFixed(1)} hour${hours === 1 ? '' : 's'}`;
+}
+
 export function browserTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';

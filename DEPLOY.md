@@ -163,6 +163,18 @@ Set `POSTGRES_PASSWORD` **before** the first start. Postgres only reads it when
 it initialises the volume; changing it later has no effect until you
 `docker compose down -v`, which erases the database.
 
+## Environment variables worth knowing
+
+Everything has a working default; these only matter when you want to change
+behaviour.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `WCC_AUTO_SYNC` | `1` | Set to `0` to stop connected calendars syncing on a schedule. Manual syncing still works. |
+| `WCC_SYNC_TICK_SECONDS` | `60` | How often the scheduler looks for calendars that are due. Rarely worth changing. |
+| `WCC_TIMEZONE` | unset | Fallback zone for a calendar with none of its own. See `CALENDAR.md`. |
+| `WCC_SECRET_KEY` | generated | Encrypts stored Microsoft sign-in tokens. Change it and you sign in again. |
+
 ## Updating
 
 ```bash

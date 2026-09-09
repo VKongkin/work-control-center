@@ -2,6 +2,7 @@
 Work Control Center - FastAPI Backend
 Main application entry point
 """
+import logging
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +11,13 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# Background syncing reports what it did through the log, since nobody is
+# watching a screen when it runs.
+logging.basicConfig(
+    level=os.getenv("WCC_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 # Import routers and models
 from app.api import tasks, followups, projects, people, departments, vendors, systems, issues, meetings, categories, dashboard, alerts, search, attachments, tools, calendar
@@ -21,9 +29,11 @@ from app.validation import register_error_handlers
 async def lifespan(app: FastAPI):
     # Startup: Create tables
     init_db()
+    # Keep connected calendars up to date without anyone pressing a button.
+    from app.services import scheduler
+    await scheduler.start()
     yield
-    # Shutdown: cleanup if needed
-    pass
+    await scheduler.stop()
 
 # Create FastAPI app
 app = FastAPI(

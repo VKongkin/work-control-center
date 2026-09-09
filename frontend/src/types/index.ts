@@ -164,6 +164,15 @@ export interface CalendarConnection {
   days_back?: number | null;
   days_ahead?: number | null;
   enabled?: boolean | null;
+  /** Whether the server syncs this calendar on a schedule of its own. */
+  auto_sync?: boolean | null;
+  sync_interval_minutes?: number | null;
+  consecutive_failures?: number | null;
+  next_sync_at?: string | null;
+  /** Seconds until the next automatic sync; negative means it is due now. */
+  next_sync_in_seconds?: number | null;
+  /** False when automatic syncing is switched off for the whole deployment. */
+  auto_sync_available?: boolean | null;
   status?: 'not_connected' | 'connected' | 'error' | null;
   last_error?: string | null;
   last_sync_at?: string | null;

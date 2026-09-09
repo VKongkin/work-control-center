@@ -6,7 +6,7 @@ registration in the company tenant; a published ICS URL needs nothing from
 anybody, and you can set it up yourself in Outlook in about a minute.
 """
 import json
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import CalendarConnection, Meeting
 from app.partial import make_lenient, make_partial, merge
-from app.services import calendar_sync, clock, graph, ics
+from app.services import calendar_sync, clock, graph, ics, scheduler
 from app.services.secrets import encrypt
 from app.validation import Name, one_of
 
@@ -36,6 +36,8 @@ class ConnectionSchema(BaseModel):
     days_back: Optional[int] = 7
     days_ahead: Optional[int] = 60
     enabled: Optional[bool] = True
+    auto_sync: Optional[bool] = True
+    sync_interval_minutes: Optional[int] = calendar_sync.DEFAULT_INTERVAL_MINUTES
 
     _provider_is_known = one_of("provider", list(PROVIDERS))
 
@@ -56,10 +58,17 @@ class ConnectionOut(BaseModel):
     days_back: Optional[int] = None
     days_ahead: Optional[int] = None
     enabled: Optional[bool] = None
+    auto_sync: Optional[bool] = None
+    sync_interval_minutes: Optional[int] = None
+    consecutive_failures: Optional[int] = None
     status: Optional[str] = None
     last_error: Optional[str] = None
     last_sync_at: Optional[datetime] = None
     last_sync_summary: Optional[str] = None
+    # Computed, not stored: when the scheduler will next pick this up.
+    next_sync_at: Optional[datetime] = None
+    next_sync_in_seconds: Optional[int] = None
+    auto_sync_available: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -85,12 +94,45 @@ def _validate(payload: ConnectionSchema) -> None:
             status_code=422,
             detail="Paste the published calendar (.ics) URL from Outlook.",
         )
+    if payload.sync_interval_minutes is not None and (
+        payload.sync_interval_minutes < calendar_sync.MIN_INTERVAL_MINUTES
+        or payload.sync_interval_minutes > 24 * 60
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sync every {calendar_sync.MIN_INTERVAL_MINUTES} minutes to 24 hours. "
+                   "Anything faster mostly re-reads a calendar that has not changed.",
+        )
     if payload.timezone and not clock.is_known(payload.timezone):
         raise HTTPException(
             status_code=422,
             detail=f"{payload.timezone!r} is not a timezone this server recognises. "
                    "Use an IANA name such as Asia/Phnom_Penh.",
         )
+
+
+def _present(row: CalendarConnection) -> dict:
+    """Shape a connection for the API, adding what the schedule implies."""
+    data = {c.name: getattr(row, c.name) for c in row.__table__.columns}
+    data.pop("refresh_token", None)  # never leaves the server
+
+    due = calendar_sync.due_at(row)
+    # These are stored naive UTC. A browser reads a timestamp with no offset as
+    # local time, so they are stamped as UTC on the way out - otherwise "synced
+    # 2 minutes ago" would be hours wrong for anyone not on UTC.
+    data["last_sync_at"] = _utc(row.last_sync_at)
+    data["next_sync_at"] = _utc(due)
+    # A plain countdown, so the page never has to do timezone arithmetic to
+    # answer the only question being asked: how long until the next one?
+    data["next_sync_in_seconds"] = (
+        None if due is None else int((due - datetime.utcnow()).total_seconds())
+    )
+    data["auto_sync_available"] = scheduler.enabled()
+    return data
+
+
+def _utc(value: Optional[datetime]) -> Optional[datetime]:
+    return value.replace(tzinfo=timezone.utc) if value is not None else None
 
 
 def _get(db: Session, connection_id: int) -> CalendarConnection:
@@ -102,7 +144,7 @@ def _get(db: Session, connection_id: int) -> CalendarConnection:
 
 @router.get("/connections", response_model=List[ConnectionOutLenient])
 def list_connections(db: Session = Depends(get_db)):
-    return db.query(CalendarConnection).order_by(CalendarConnection.id).all()
+    return [_present(r) for r in db.query(CalendarConnection).order_by(CalendarConnection.id).all()]
 
 
 @router.post("/connections", response_model=ConnectionOutLenient)
@@ -113,12 +155,12 @@ def create_connection(payload: ConnectionSchema, db: Session = Depends(get_db)):
     db.add(row)
     db.commit()
     db.refresh(row)
-    return row
+    return _present(row)
 
 
 @router.get("/connections/{connection_id}", response_model=ConnectionOutLenient)
 def get_connection(connection_id: int, db: Session = Depends(get_db)):
-    return _get(db, connection_id)
+    return _present(_get(db, connection_id))
 
 
 @router.put("/connections/{connection_id}", response_model=ConnectionOutLenient)
@@ -152,7 +194,7 @@ def update_connection(connection_id: int, payload: ConnectionPartial,
         row.last_sync_summary = json.dumps({"retimed": moved})
         db.commit()
         db.refresh(row)
-    return row
+    return _present(row)
 
 
 def _reanchor(db: Session, connection: CalendarConnection,
@@ -313,7 +355,7 @@ def sign_out(connection_id: int, db: Session = Depends(get_db)):
     row.last_error = None
     db.commit()
     db.refresh(row)
-    return row
+    return _present(row)
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +381,23 @@ def sync_connection(connection_id: int, db: Session = Depends(get_db)):
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "Sync failed"))
     return result
+
+
+@router.post("/tick")
+def run_scheduler_now():
+    """Do exactly what the background scheduler does on its next tick.
+
+    Only calendars that are actually due are touched, so this answers "is
+    automatic syncing set up correctly?" without waiting out an interval, and
+    without the different behaviour a plain /sync would give.
+    """
+    results = scheduler.run_due_now()
+    return {
+        "enabled": scheduler.enabled(),
+        "tick_seconds": scheduler.TICK_SECONDS,
+        "synced": len(results),
+        "results": results,
+    }
 
 
 @router.post("/sync")

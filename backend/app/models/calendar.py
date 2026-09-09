@@ -40,6 +40,16 @@ class CalendarConnection(Base):
     days_ahead = Column(Integer, default=60)
 
     enabled = Column(Boolean, default=True)
+
+    # ---- automatic syncing -------------------------------------------------
+    # On by default: a calendar you have to remember to press a button for is
+    # not really synced. The interval is per connection so a busy work diary and
+    # a quiet shared one need not be refreshed at the same rate.
+    auto_sync = Column(Boolean, default=True)
+    sync_interval_minutes = Column(Integer, default=30)
+    # Counts failures in a row, so a broken feed backs off instead of being
+    # retried every half hour forever. Reset by the first success.
+    consecutive_failures = Column(Integer, default=0)
     status = Column(String(32), default="not_connected")  # not_connected|connected|error
     last_error = Column(Text, nullable=True)
     last_sync_at = Column(DateTime, nullable=True)

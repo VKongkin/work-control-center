@@ -7,16 +7,28 @@ import { calendarApi, apiError } from '../api/client';
 import { requestRefresh } from '../hooks/useResource';
 import { useToast } from '../components/Toast';
 import {
-  Button, ComboboxField, EmptyState, ErrorBanner, Modal, PageHeader, SelectField,
-  Spinner, TextField,
+  Button, CheckboxField, ComboboxField, EmptyState, ErrorBanner, Modal, PageHeader,
+  SelectField, Spinner, TextField,
 } from '../components/ui';
 import { CalendarConnection, DeviceCode } from '../types';
-import { browserTimeZone, fmtDate, knownTimeZones } from '../lib/constants';
+import { browserTimeZone, fmtCountdown, fmtDate, fmtInterval, knownTimeZones } from '../lib/constants';
 
 // Offered as a searchable list where the browser can supply one. Falling back
 // to a plain field matters: an unrecognised name is refused by the server, so
 // a missing list must not leave the setting unreachable.
 const ZONES = knownTimeZones();
+
+// Presets rather than a free number: the useful choices are few, and a typo in
+// a minutes box is a calendar that either hammers Outlook or never refreshes.
+const INTERVALS = [
+  { value: '15', label: 'Every 15 minutes' },
+  { value: '30', label: 'Every 30 minutes' },
+  { value: '60', label: 'Every hour' },
+  { value: '120', label: 'Every 2 hours' },
+  { value: '240', label: 'Every 4 hours' },
+  { value: '480', label: 'Every 8 hours' },
+  { value: '1440', label: 'Once a day' },
+];
 
 const PROVIDERS = [
   { value: 'ics', label: 'Published calendar link (no IT approval needed)' },
@@ -32,6 +44,8 @@ const BLANK = {
   // Outlook publishes meetings in UTC. Defaulting to the zone this browser is
   // already set to means a new calendar reads correctly without being asked.
   timezone: browserTimeZone(),
+  auto_sync: true,
+  sync_interval_minutes: '30',
   days_back: '7',
   days_ahead: '60',
 };
@@ -65,6 +79,18 @@ export default function CalendarSettingsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // The next-sync countdown would otherwise sit frozen at whatever it said when
+  // the page opened, and a background sync would not show up here at all.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const start = () => { if (!timer) timer = setInterval(load, 30000); };
+    const stop = () => { if (timer) clearInterval(timer); timer = undefined; };
+    const onVisibility = () => (document.visibilityState === 'visible' ? start() : stop());
+    onVisibility();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { document.removeEventListener('visibilitychange', onVisibility); stop(); };
+  }, [load]);
+
   function openNew() {
     setEditing(null);
     setForm({ ...BLANK });
@@ -81,6 +107,8 @@ export default function CalendarSettingsPage() {
       tenant_id: row.tenant_id ?? '',
       client_id: row.client_id ?? '',
       timezone: row.timezone || browserTimeZone(),
+      auto_sync: row.auto_sync ?? true,
+      sync_interval_minutes: String(row.sync_interval_minutes ?? 30),
       days_back: String(row.days_back ?? 7),
       days_ahead: String(row.days_ahead ?? 60),
     });
@@ -95,6 +123,8 @@ export default function CalendarSettingsPage() {
       provider: form.provider,
       display_name: form.display_name.trim(),
       timezone: form.timezone.trim() || null,
+      auto_sync: form.auto_sync,
+      sync_interval_minutes: Number(form.sync_interval_minutes) || 30,
       days_back: Number(form.days_back) || 7,
       days_ahead: Number(form.days_ahead) || 60,
     };
@@ -326,6 +356,28 @@ export default function CalendarSettingsPage() {
             />
           )}
 
+          <div className="sm:col-span-2 rounded-lg bg-slate-50 p-4 ring-1 ring-inset ring-slate-200">
+            <CheckboxField
+              label="Keep this calendar in sync automatically"
+              checked={form.auto_sync}
+              onChange={(v: boolean) => setForm({ ...form, auto_sync: v })}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              The server refreshes it on its own, so meetings are there before you
+              think to look. Turn this off to sync only when you press the button.
+            </p>
+            {form.auto_sync && (
+              <div className="mt-3">
+                <SelectField
+                  name="sync_interval_minutes" label="How often"
+                  value={form.sync_interval_minutes}
+                  onChange={(v: string) => setForm({ ...form, sync_interval_minutes: v })}
+                  options={INTERVALS}
+                />
+              </div>
+            )}
+          </div>
+
           <TextField
             name="days_back" label="Sync from (days back)"
             value={form.days_back}
@@ -415,6 +467,7 @@ function ConnectionCard({
             {row.days_back ?? 7} days back, {row.days_ahead ?? 60} ahead
             {row.timezone ? ` · times in ${row.timezone.replace(/_/g, ' ')}` : ''}
           </p>
+          <ScheduleLine row={row} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -482,6 +535,53 @@ function ConnectionCard({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * What the schedule is doing, in one line.
+ *
+ * The countdown arrives from the server as a plain number of seconds rather
+ * than a timestamp: the page would otherwise have to reason about the server's
+ * clock against the browser's, which is the arithmetic that got meeting times
+ * wrong in the first place.
+ */
+function ScheduleLine({ row }: { row: CalendarConnection }) {
+  if (row.auto_sync_available === false) {
+    return (
+      <p className="mt-1 text-xs text-slate-500">
+        Automatic syncing is switched off on this server (WCC_AUTO_SYNC).
+      </p>
+    );
+  }
+  if (!row.auto_sync) {
+    return (
+      <p className="mt-1 text-xs text-slate-500">
+        Automatic syncing off — this calendar refreshes only when you press Sync.
+      </p>
+    );
+  }
+
+  const failures = row.consecutive_failures ?? 0;
+  const waiting = row.provider === 'microsoft' && !row.account;
+  const countdown = row.next_sync_in_seconds;
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-emerald-700">
+      <RefreshCw size={12} className="shrink-0" />
+      <span>
+        Syncs {fmtInterval(row.sync_interval_minutes)}
+        {waiting
+          ? ' — waiting for you to sign in'
+          : countdown !== null && countdown !== undefined
+            ? ` · next ${fmtCountdown(countdown)}`
+            : ''}
+      </span>
+      {failures > 0 && (
+        <span className="text-amber-700">
+          · backing off after {failures} failed {failures === 1 ? 'attempt' : 'attempts'}
+        </span>
+      )}
+    </p>
   );
 }
 
@@ -654,6 +754,7 @@ function HowTo() {
       <div className="mt-5 border-t border-slate-100 pt-4">
         <p className="font-medium text-slate-900">What syncing will and will not do</p>
         <ul className="mt-2 space-y-1.5 text-slate-600">
+          <li>• It refreshes itself every 30 minutes — adjustable per calendar, or off.</li>
           <li>• Your notes, decisions and contacts are never touched.</li>
           <li>• Any calendar field you edit by hand is kept, on every future sync.</li>
           <li>• A meeting removed from Outlook is marked cancelled here, never deleted.</li>

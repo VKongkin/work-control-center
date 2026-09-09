@@ -132,6 +132,32 @@ rest of WCC does for every date it holds. The trade-off is that they stay
 anchored to that zone rather than following you abroad — for a work diary, that
 is usually what you want.
 
+### Automatic syncing
+
+Every calendar refreshes itself on a schedule — **every 30 minutes** by default,
+changeable per calendar from 15 minutes to once a day. Nothing extra to install:
+the schedule runs inside the same container as the rest of the app, so
+`docker compose up -d` is still the whole story.
+
+The connection card shows what the schedule is doing and when the next run
+lands. A page you have open picks up a background sync on its own, so meetings
+appear without a reload.
+
+- **A newly connected calendar syncs immediately**, rather than waiting out a
+  first interval.
+- **A restart does not reset the clock.** The next run is worked out from the
+  last successful sync, so a container that restarts mid-interval picks up where
+  it left off.
+- **A failing calendar backs off** — 30 minutes, then 60, 120, 240, capped
+  there — instead of retrying on the dot forever. The card says so, and one
+  success clears it.
+- **A Microsoft calendar you have not signed into is skipped** until you do.
+- **Turn it off** per calendar with the checkbox, and it syncs only when you
+  press Sync. `WCC_AUTO_SYNC=0` disables scheduling for the whole deployment.
+
+Automatic syncing follows exactly the same rules as pressing the button: your
+notes are untouched, your hand edits are kept, and nothing is ever deleted.
+
 ### The sync window
 
 Each connection syncs a window around today — 7 days back and 60 days ahead by

@@ -425,6 +425,94 @@ END:VCALENDAR
         if str(m.get("title", "")).startswith("TEST "):
             api("DELETE", f"/api/meetings/{m['id']}")
 
+    # -- automatic syncing --------------------------------------------------
+    section("Syncing itself, on a schedule")
+    FEED["body"] = build_feed(title="TEST auto board")
+    auto = api("POST", "/api/calendar/connections",
+               json={"provider": "ics", "display_name": "TEST auto", "ics_url": FEED_URL,
+                     "sync_interval_minutes": 30}).json()
+    aid = auto["id"]
+    check("Automatic syncing is on by default", auto["auto_sync"] is True, str(auto.get("auto_sync")))
+    check("...every 30 minutes by default", auto["sync_interval_minutes"] == 30,
+          str(auto.get("sync_interval_minutes")))
+    check("A calendar that has never synced is due at once",
+          auto["next_sync_in_seconds"] is not None and auto["next_sync_in_seconds"] <= 0,
+          str(auto.get("next_sync_in_seconds")))
+    check("Timestamps say which zone they are in",
+          str(auto.get("next_sync_at", "")).endswith(("Z", "+00:00")), str(auto.get("next_sync_at")))
+    check("The refresh token never reaches the browser", "refresh_token" not in auto,
+          str(list(auto.keys())))
+
+    r = api("POST", "/api/calendar/tick")
+    body = r.json()
+    check("A scheduler tick picks it up", body["synced"] >= 1, r.text[:160])
+    check("The tick reports whether scheduling is on", body["enabled"] is True, r.text[:120])
+    check("It actually created the meetings",
+          len([m for m in meetings_for(aid)]) >= 1, str(len(meetings_for(aid))))
+
+    row = api("GET", f"/api/calendar/connections/{aid}").json()
+    check("The next run is an interval away",
+          1500 < (row["next_sync_in_seconds"] or 0) <= 1800, str(row.get("next_sync_in_seconds")))
+
+    before = row["last_sync_at"]
+    r = api("POST", "/api/calendar/tick")
+    check("A second tick does nothing while it is not due", r.json()["synced"] == 0, r.text[:120])
+    check("...and leaves the last sync time alone",
+          api("GET", f"/api/calendar/connections/{aid}").json()["last_sync_at"] == before)
+
+    api("PUT", f"/api/calendar/connections/{aid}", json={"auto_sync": False})
+    row = api("GET", f"/api/calendar/connections/{aid}").json()
+    check("Turning it off stops it being scheduled", row["next_sync_at"] is None,
+          str(row.get("next_sync_at")))
+    check("...and the countdown goes away too", row["next_sync_in_seconds"] is None)
+
+    api("PUT", f"/api/calendar/connections/{aid}", json={"auto_sync": True, "sync_interval_minutes": 120})
+    row = api("GET", f"/api/calendar/connections/{aid}").json()
+    check("Turning it back on reschedules from the last sync",
+          6900 < (row["next_sync_in_seconds"] or 0) <= 7200, str(row.get("next_sync_in_seconds")))
+
+    r = api("PUT", f"/api/calendar/connections/{aid}", json={"sync_interval_minutes": 1})
+    check("An interval below the floor is refused", r.status_code == 422, r.text[:140])
+    r = api("PUT", f"/api/calendar/connections/{aid}", json={"sync_interval_minutes": 5000})
+    check("...and so is one beyond a day", r.status_code == 422, r.text[:140])
+    check("The interval is unchanged after a refusal",
+          api("GET", f"/api/calendar/connections/{aid}").json()["sync_interval_minutes"] == 120)
+
+    # a broken feed must back off rather than retry on the dot forever
+    broken = api("POST", "/api/calendar/connections",
+                 json={"provider": "ics", "display_name": "TEST broken feed",
+                       "ics_url": "http://127.0.0.1:4/nothing.ics",
+                       "sync_interval_minutes": 30}).json()
+    bid = broken["id"]
+    gaps = []
+    for _ in range(4):
+        api("POST", f"/api/calendar/connections/{bid}/sync")
+        row = api("GET", f"/api/calendar/connections/{bid}").json()
+        gaps.append(round((row["next_sync_in_seconds"] or 0) / 60))
+    check("A failing calendar backs off instead of hammering",
+          gaps[0] > 30 and gaps[1] > gaps[0], str(gaps))
+    check("...and the backoff is capped", gaps[-1] <= 240, str(gaps))
+    row = api("GET", f"/api/calendar/connections/{bid}").json()
+    check("The failures are counted", (row["consecutive_failures"] or 0) >= 4,
+          str(row.get("consecutive_failures")))
+    check("...and the reason is kept for you to read",
+          "reach" in (row.get("last_error") or "").lower(), str(row.get("last_error"))[:80])
+
+    # a success clears the backoff
+    api("PUT", f"/api/calendar/connections/{bid}", json={"ics_url": FEED_URL})
+    api("POST", f"/api/calendar/connections/{bid}/sync")
+    row = api("GET", f"/api/calendar/connections/{bid}").json()
+    check("One success clears the backoff", (row["consecutive_failures"] or 0) == 0,
+          str(row.get("consecutive_failures")))
+    check("...and the schedule returns to normal",
+          1500 < (row["next_sync_in_seconds"] or 0) <= 1800, str(row.get("next_sync_in_seconds")))
+
+    api("DELETE", f"/api/calendar/connections/{bid}")
+    api("DELETE", f"/api/calendar/connections/{aid}")
+    for m in api("GET", "/api/meetings", params={"limit": 500}).json():
+        if str(m.get("title", "")).startswith(("TEST auto board", "Vendor catch-up")):
+            api("DELETE", f"/api/meetings/{m['id']}")
+
     # -- microsoft path (mocked) -------------------------------------------
     section("Microsoft path (mocked Graph)")
     r = api("POST", "/api/calendar/connections",

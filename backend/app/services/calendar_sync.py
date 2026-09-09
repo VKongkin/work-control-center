@@ -39,6 +39,43 @@ class SyncError(RuntimeError):
     """Something the user needs to read and act on."""
 
 
+DEFAULT_INTERVAL_MINUTES = 30
+MIN_INTERVAL_MINUTES = 5
+# A failing calendar backs off rather than being retried on the dot forever.
+# Capped so a feed that comes back is picked up again within a few hours.
+MAX_BACKOFF_MULTIPLIER = 8
+
+
+def interval_minutes(connection: CalendarConnection) -> int:
+    value = connection.sync_interval_minutes or DEFAULT_INTERVAL_MINUTES
+    return max(MIN_INTERVAL_MINUTES, int(value))
+
+
+def due_at(connection: CalendarConnection) -> Optional[datetime]:
+    """When this calendar should next sync itself, or None if it should not.
+
+    A connection that has never synced is due immediately, so switching
+    auto-sync on does not mean waiting out a whole interval first.
+    """
+    if not connection.enabled or not connection.auto_sync:
+        return None
+    if connection.provider == "microsoft" and not connection.refresh_token:
+        return None  # nothing to do until someone signs in
+    if connection.last_sync_at is None:
+        return datetime.utcnow()
+
+    minutes = interval_minutes(connection)
+    failures = connection.consecutive_failures or 0
+    if failures:
+        minutes *= min(2 ** failures, MAX_BACKOFF_MULTIPLIER)
+    return connection.last_sync_at + timedelta(minutes=minutes)
+
+
+def is_due(connection: CalendarConnection, now: Optional[datetime] = None) -> bool:
+    when = due_at(connection)
+    return when is not None and when <= (now or datetime.utcnow())
+
+
 def edited_fields(meeting: Meeting) -> List[str]:
     """The field names the user has changed by hand on this meeting."""
     raw = getattr(meeting, "locally_edited", None)
@@ -225,6 +262,9 @@ def run(db: Session, connection: CalendarConnection) -> Dict[str, Any]:
         connection.status = "error"
         connection.last_error = str(e)
         connection.last_sync_at = datetime.utcnow()
+        # Stamping the attempt is what makes the backoff work: without it a
+        # failing calendar would look permanently overdue and retry on every tick.
+        connection.consecutive_failures = (connection.consecutive_failures or 0) + 1
         db.commit()
         return {"ok": False, "error": str(e)}
 
@@ -233,6 +273,7 @@ def run(db: Session, connection: CalendarConnection) -> Dict[str, Any]:
     connection.last_error = None
     connection.last_sync_at = datetime.utcnow()
     connection.last_sync_summary = json.dumps(summary)
+    connection.consecutive_failures = 0
     db.commit()
     return {"ok": True, "summary": summary, "fetched": len(rows)}
 
