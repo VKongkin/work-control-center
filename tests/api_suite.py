@@ -1,5 +1,6 @@
 """Full backend suite: every endpoint, every method, plus validation and edge cases."""
 import json, urllib.request, urllib.error, sys, time
+from datetime import datetime, timedelta
 
 RUN = str(int(time.time()))[-6:]
 
@@ -265,6 +266,54 @@ check("nonsense date still rejected", s_ == 422, f"got {s_}")
 s_, made = call("POST", "/api/tasks", {"title": "ts", "due_date": "2026-10-01T09:30:00"})
 check("full timestamp still accepted", s_ == 200 and "09:30" in str(made.get("due_date")), made.get("due_date"))
 if s_ == 200: call("DELETE", f"/api/tasks/{made['id']}")
+
+section("Meetings read as a diary, not just a table")
+# The agenda needs the soonest first and a bounded window; the old default -
+# newest first, everything - put today somewhere in the middle of the list.
+made_ids = []
+for offset, title in ((-3, "ORD past"), (1, "ORD soon"), (9, "ORD later")):
+    when = (datetime.now() + timedelta(days=offset)).strftime("%Y-%m-%dT10:00:00")
+    s_, m = call("POST", "/api/meetings", {"title": title, "meeting_date": when})
+    if s_ == 200: made_ids.append(m["id"])
+
+s_, rows = call("GET", "/api/meetings?order=asc&limit=500")
+ours = [r["title"] for r in rows if str(r["title"]).startswith("ORD ")]
+check("ascending order puts the earliest first", ours == ["ORD past", "ORD soon", "ORD later"], str(ours))
+
+s_, rows = call("GET", "/api/meetings?order=desc&limit=500")
+ours = [r["title"] for r in rows if str(r["title"]).startswith("ORD ")]
+check("descending order still works, and is the default",
+      ours == ["ORD later", "ORD soon", "ORD past"], str(ours))
+
+s_, rows = call("GET", "/api/meetings?limit=500")
+default_order = [r["title"] for r in rows if str(r["title"]).startswith("ORD ")]
+check("omitting order keeps the old behaviour", default_order == ours, str(default_order))
+
+frm = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00")
+to = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT23:59:59")
+s_, rows = call("GET", f"/api/meetings?order=asc&limit=500&from_date={frm}&to_date={to}")
+ours = [r["title"] for r in rows if str(r["title"]).startswith("ORD ")]
+check("a date window excludes what falls outside it", ours == ["ORD soon"], str(ours))
+
+s_, rows = call("GET", f"/api/meetings?limit=500&from_date={frm}")
+ours = [r["title"] for r in rows if str(r["title"]).startswith("ORD ")]
+check("an open-ended window works too", "ORD past" not in ours and "ORD soon" in ours, str(ours))
+
+s_, r = call("GET", "/api/meetings?order=sideways")
+check("a nonsense order is refused", s_ == 422, f"got {s_}")
+s_, r = call("GET", "/api/meetings?from_date=nonsense")
+check("a nonsense date bound is refused", s_ == 422, f"got {s_}")
+
+# a meeting with no date must not vanish from an ordered list
+s_, undated = call("POST", "/api/meetings", {"title": "ORD undated"})
+if s_ == 200:
+    made_ids.append(undated["id"])
+    s_, rows = call("GET", "/api/meetings?order=asc&limit=500")
+    check("an undated meeting is still returned",
+          any(r["title"] == "ORD undated" for r in rows))
+
+for i in made_ids:
+    call("DELETE", f"/api/meetings/{i}")
 
 print(f"\n{'='*52}\n  \033[1m{ok} passed, {fail} failed\033[0m\n{'='*52}")
 if failures:

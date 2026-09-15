@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarCheck2, Lock, Video, RefreshCw, CalendarRange } from 'lucide-react';
-import CrudPage, { ColumnDef, FieldDef } from '../components/CrudPage';
+import { CalendarCheck2, Lock, RefreshCw, CalendarRange, Search, X } from 'lucide-react';
+import CrudPage, { FieldDef, ListRender } from '../components/CrudPage';
+import Agenda from '../components/Agenda';
 import { DetailRow } from '../components/DetailView';
 import { calendarApi, meetingApi, meetingSync, apiError } from '../api/client';
 import { requestRefresh } from '../hooks/useResource';
@@ -9,7 +10,8 @@ import { useCalendarWatch } from '../hooks/useCalendarWatch';
 import { useToast } from '../components/Toast';
 import { Button } from '../components/ui';
 import { Meeting, SyncSummary } from '../types';
-import { fmtDate, fmtDateTime } from '../lib/constants';
+import { fmtDate } from '../lib/constants';
+import { dayNumber, startOf } from '../lib/agenda';
 
 const fields: FieldDef[] = [
   { key: 'title', label: 'Title', type: 'text', required: true, full: true },
@@ -21,41 +23,6 @@ const fields: FieldDef[] = [
   { key: 'participants', label: 'Participants', type: 'textarea', full: true, placeholder: 'Names, comma separated' },
   { key: 'notes', label: 'Notes', type: 'textarea', full: true },
   { key: 'decisions', label: 'Decisions', type: 'textarea', full: true },
-];
-
-const columns: ColumnDef<Meeting>[] = [
-  { header: 'Meeting', key: 'title' },
-  {
-    header: 'When',
-    // An all-day entry has no time of day; printing "12:00 AM" would invent one.
-    cell: (r) => (
-      <span className="text-slate-600">
-        {r.all_day ? `${fmtDate(r.meeting_date)} · all day` : fmtDateTime(r.meeting_date)}
-      </span>
-    ),
-  },
-  {
-    header: 'Where',
-    cell: (r) =>
-      r.join_url ? (
-        <a
-          href={r.join_url}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1.5 font-medium text-blue-700 hover:underline"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Video size={14} /> Join
-        </a>
-      ) : (
-        <span className="text-slate-600">{r.location || '—'}</span>
-      ),
-  },
-  { header: 'Participants', key: 'participants' },
-  {
-    header: 'Contact',
-    cell: (r, lk) => <span className="text-slate-600">{lk.nameOf('people', r.primary_contact_id)}</span>,
-  },
 ];
 
 const isSynced = (m: Meeting) => !!m.source && m.source !== 'WCC';
@@ -98,9 +65,27 @@ function SourceBadges({ meeting }: { meeting: Meeting }) {
   );
 }
 
+type Scope = 'today' | 'upcoming' | 'all';
+
+const SCOPES: { value: Scope; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: 'upcoming', label: 'Upcoming' },
+  { value: 'all', label: 'All' },
+];
+
 export default function MeetingsPage() {
   const toast = useToast();
   const [syncing, setSyncing] = useState(false);
+  const [scope, setScope] = useState<Scope>('upcoming');
+  const [query, setQuery] = useState('');
+
+  // "in 40 min" has to keep being true while the page sits open, and a meeting
+  // has to move itself from Up next to Happening now without a reload.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
   // The server syncs on its own schedule, so the list has to notice a refresh
   // that nobody on this page asked for.
@@ -222,17 +207,114 @@ export default function MeetingsPage() {
     </>
   );
 
+  /** Scope and search narrow what the agenda is given; it does the grouping. */
+  function visible(items: Meeting[]): Meeting[] {
+    const today = dayNumber(now);
+    const q = query.trim().toLowerCase();
+    return items.filter((m) => {
+      const start = startOf(m);
+      // A meeting with no date is not in the past, so hiding it from the
+      // default view would be losing it. Only "Today" can reasonably exclude it.
+      if (scope === 'today' && (!start || dayNumber(start) !== today)) return false;
+      if (scope === 'upcoming' && start && dayNumber(start) < today) return false;
+      if (!q) return true;
+      return [m.title, m.location, m.organizer, m.participants, m.notes, m.decisions]
+        .some((v) => (v ?? '').toLowerCase().includes(q));
+    });
+  }
+
+  function renderList(list: ListRender<Meeting>) {
+    const shown = visible(list.items);
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="Which meetings">
+            {SCOPES.map((s) => (
+              <button
+                key={s.value}
+                onClick={() => setScope(s.value)}
+                aria-pressed={scope === s.value}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  scope === s.value
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              id="meeting-search"
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search meetings…"
+              aria-label="Search meetings"
+              className="block w-full rounded-lg border-0 py-2 pl-9 pr-8 text-sm text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-blue-600"
+            />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <p className="text-sm text-slate-500">
+            {shown.length} of {list.items.length}
+          </p>
+        </div>
+
+        {shown.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center">
+            <p className="font-medium text-slate-900">
+              {query ? `Nothing matches “${query}”` : scope === 'today'
+                ? 'Nothing in the diary today'
+                : 'Nothing scheduled'}
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              {query
+                ? 'Searching titles, people, locations and notes.'
+                : scope === 'all'
+                  ? 'Meetings you create or sync from Outlook appear here.'
+                  : 'Try “All” to include meetings that have already happened.'}
+            </p>
+          </div>
+        ) : (
+          <Agenda
+            meetings={shown}
+            now={now}
+            onView={list.onView}
+            onEdit={list.onEdit}
+            onDelete={list.onDelete}
+            blockedReason={list.blockedReason}
+            badges={(m) => <SourceBadges meeting={m} />}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <CrudPage<Meeting>
       title="Meetings" singular="Meeting" api={meetingApi}
-      fields={fields} columns={columns} attachAs="meeting"
+      fields={fields} attachAs="meeting"
       labelKey="title"
-      subtitle="Notes, decisions and who was there"
+      subtitle="Today first, then what is coming"
       emptyHint="Capture meetings so decisions do not live only in your head."
       headerExtra={header}
       rowBadges={(m) => <SourceBadges meeting={m} />}
       hideFields={(m) => (m?.all_day ? ['ends_at'] : [])}
       extraDetailRows={extraDetailRows}
+      listParams={{ order: 'asc', limit: 500 }}
+      renderList={renderList}
       blockDelete={(m) =>
         isSynced(m)
           ? 'This came from your connected calendar. Cancel it in Outlook, or disconnect the calendar to take ownership.'

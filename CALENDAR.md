@@ -158,6 +158,23 @@ appear without a reload.
 Automatic syncing follows exactly the same rules as pressing the button: your
 notes are untouched, your hand edits are kept, and nothing is ever deleted.
 
+### Finding today's meeting
+
+The Meetings page is a diary, not a table. Today comes first, with the meeting
+you are walking into next pinned above it and a countdown beside it; then
+tomorrow, then the next seven days, then later. Past meetings are folded away
+behind a toggle - the notes on them are the point, but nobody opens this page to
+read last month's.
+
+- **Today / Upcoming / All** narrows the whole agenda. Upcoming is the default.
+- **Search** covers titles, people, locations, notes and decisions.
+- A meeting in progress is marked *Happening now* and highlighted.
+- **Today's meetings also appear on the Dashboard**, with their Join links, so
+  the first page you land on answers what is on today.
+
+A meeting with no date set is still shown, under *No date set* - it is not in
+the past, so hiding it would be losing it.
+
 ### The sync window
 
 Each connection syncs a window around today — 7 days back and 60 days ahead by

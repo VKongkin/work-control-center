@@ -50,7 +50,8 @@ interface Props<T> {
   singular: string;
   api: any;
   fields: FieldDef[];
-  columns: ColumnDef<T>[];
+  /** Table columns. Not needed when `renderList` draws the list instead. */
+  columns?: ColumnDef<T>[];
   /** field used in the delete confirmation copy */
   labelKey?: keyof T & string;
   emptyHint?: string;
@@ -77,17 +78,41 @@ interface Props<T> {
   rowBadges?: (row: T) => ReactNode;
   /** Fields to leave out of the form for this particular row. */
   hideFields?: (row: T | null) => string[];
+  /**
+   * Draw the list some other way than as a table, keeping everything else -
+   * the form, validation, the detail view, the delete guard - as it is.
+   * A diary reads as an agenda, not as rows sorted by a column.
+   */
+  renderList?: (list: ListRender<T>) => ReactNode;
+  /** Query parameters for the list request, replacing the default. */
+  listParams?: Record<string, any>;
+}
+
+/** What a custom list renderer is handed. */
+export interface ListRender<T> {
+  items: T[];
+  onView: (row: T) => void;
+  onEdit: (row: T) => void;
+  onDelete: (row: T) => void;
+  /** A reason this row cannot be deleted, or null. */
+  blockedReason: (row: T) => string | null;
+  refresh: () => void;
 }
 
 export default function CrudPage<T extends { id: number }>({
-  title, subtitle, singular, api, fields, columns, labelKey = 'name' as any, emptyHint,
+  title, subtitle, singular, api, fields, columns = [], labelKey = 'name' as any, emptyHint,
   archivable, deleteNote, attachAs, blockDelete, headerExtra, extraDetailRows, rowBadges,
-  hideFields,
+  hideFields, renderList, listParams,
 }: Props<T>) {
   const [showArchived, setShowArchived] = useState(false);
+  const extra = JSON.stringify(listParams ?? {});
   const params = useMemo(
-    () => (archivable && showArchived ? { limit: 200, include_inactive: true } : { limit: 200 }),
-    [archivable, showArchived]
+    () => ({
+      limit: 200,
+      ...(archivable && showArchived ? { include_inactive: true } : {}),
+      ...JSON.parse(extra),
+    }),
+    [archivable, showArchived, extra]
   );
   const { items, loading, error, saving, refresh, create, update, remove } =
     useResource<T>(api, singular, params);
@@ -249,8 +274,20 @@ export default function CrudPage<T extends { id: number }>({
             </Button>
           }
         />
+      ) : renderList ? (
+        // data-list / data-row-id mark the list and its records whichever way
+        // it is drawn, so anything reading the page - a test, a screen reader
+        // helper - does not have to know it is looking at a table today.
+        <div data-list>{renderList({
+          items,
+          onView: setViewing,
+          onEdit: openEdit,
+          onDelete: setToDelete,
+          blockedReason: (row) => blockDelete?.(row) ?? null,
+          refresh,
+        })}</div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div data-list className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b border-slate-200 bg-slate-50 text-left text-slate-600">
@@ -263,7 +300,7 @@ export default function CrudPage<T extends { id: number }>({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {items.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50/70">
+                  <tr key={row.id} data-row-id={row.id} className="hover:bg-slate-50/70">
                     {columns.map((c, i) => (
                       <td key={c.header} className="px-4 py-3">
                         {i === 0 ? (

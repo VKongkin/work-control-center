@@ -69,14 +69,34 @@ def get_meetings(
     limit: int = Query(100),
     source: Optional[str] = Query(None, description="WCC, microsoft or ics"),
     include_cancelled: bool = Query(True),
+    order: str = Query("desc", description="asc for an agenda, desc for a history"),
+    from_date: Timestamp = Query(None, description="Only meetings at or after this moment"),
+    to_date: Timestamp = Query(None, description="Only meetings at or before this moment"),
 ):
-    """Get all meetings"""
+    """Get all meetings.
+
+    Defaults to newest first, which reads as a history. An agenda wants the
+    opposite and a bounded window, hence `order` and the two date bounds -
+    otherwise the page would have to pull everything and sort it itself.
+    """
+    if order not in ("asc", "desc"):
+        raise HTTPException(status_code=422, detail="order must be 'asc' or 'desc'")
+
     query = db.query(Meeting)
     if source:
         query = query.filter(Meeting.source == source)
     if not include_cancelled:
         query = query.filter((Meeting.is_cancelled == False) | (Meeting.is_cancelled.is_(None)))  # noqa: E712
-    rows = query.order_by(Meeting.meeting_date.desc()).offset(skip).limit(limit).all()
+    if from_date is not None:
+        query = query.filter(Meeting.meeting_date >= from_date)
+    if to_date is not None:
+        query = query.filter(Meeting.meeting_date <= to_date)
+
+    # A meeting with no date would sort unpredictably and vanish from an agenda,
+    # so it is kept at the far end rather than dropped.
+    column = Meeting.meeting_date
+    ordering = column.asc().nullslast() if order == "asc" else column.desc().nullslast()
+    rows = query.order_by(ordering).offset(skip).limit(limit).all()
     return [_present(m) for m in rows]
 
 

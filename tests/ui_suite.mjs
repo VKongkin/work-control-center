@@ -89,7 +89,9 @@ const CRUD = [
 for (const c of CRUD) {
   section(`CRUD through the UI — ${c.singular}`);
   await go(c.path);
-  const before = await page.locator('tbody tr').count();
+  // Meetings draws an agenda rather than a table, so the lifecycle is
+  // driven through the markers every list carries regardless of its shape.
+  const before = await page.locator('[data-row-id]').count();
   const value = `UI ${c.singular} ${stamp()}`;
 
   await page.locator(`button:has-text("New ${c.singular}")`).first().click();
@@ -99,11 +101,11 @@ for (const c of CRUD) {
   await dialog().locator(`#f-${c.nameField}`).fill(value);
   await page.locator(`button:has-text("${c.create}")`).click();
   await page.waitForTimeout(1300);
-  check(`${c.singular}: created`, (await page.locator('tbody').textContent()).includes(value));
-  check(`${c.singular}: row count grew`, (await page.locator('tbody tr').count()) === before + 1);
+  check(`${c.singular}: created`, (await page.locator('[data-list]').textContent()).includes(value));
+  check(`${c.singular}: row count grew`, (await page.locator('[data-row-id]').count()) === before + 1);
 
   // edit
-  const row = page.locator('tbody tr', { hasText: value }).first();
+  const row = page.locator('[data-row-id]', { hasText: value }).first();
   await row.locator('button[aria-label="Edit"]').click();
   await page.waitForTimeout(500);
   check(`${c.singular}: edit form prefilled`,
@@ -111,11 +113,11 @@ for (const c of CRUD) {
   await dialog().locator(`#f-${c.nameField}`).fill(value + ' v2');
   await page.locator('button:has-text("Save changes")').click();
   await page.waitForTimeout(1300);
-  check(`${c.singular}: edit saved`, (await page.locator('tbody').textContent()).includes(value + ' v2'));
+  check(`${c.singular}: edit saved`, (await page.locator('[data-list]').textContent()).includes(value + ' v2'));
 
   // delete / archive
   const label = c.archivable ? 'Archive' : 'Delete';
-  await page.locator('tbody tr', { hasText: value + ' v2' }).first()
+  await page.locator('[data-row-id]', { hasText: value + ' v2' }).first()
     .locator(`button[aria-label="${label}"]`).click();
   await page.waitForTimeout(400);
   const confirmText = await dialog().textContent();
@@ -125,7 +127,7 @@ for (const c of CRUD) {
   await dialog().locator(`button:has-text("${label}")`).last().click();
   await page.waitForTimeout(1400);
   check(`${c.singular}: removed from list`,
-    !(await page.locator('tbody').textContent()).includes(value));
+    !(await page.locator('[data-list]').textContent()).includes(value));
 }
 
 /* ---------------------------------------------------------- follow-ups */

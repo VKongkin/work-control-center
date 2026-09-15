@@ -219,9 +219,11 @@ export default function TasksPage() {
                   <th className="px-4 py-3 text-right font-medium">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              {/* Same markers every list in the app carries, so anything
+                  reading the page need not know its shape. */}
+              <tbody data-list className="divide-y divide-slate-100">
                 {visible.map((t) => (
-                  <tr key={t.id} className="hover:bg-slate-50/70">
+                  <tr key={t.id} data-row-id={t.id} className="hover:bg-slate-50/70">
                     <td className="max-w-[320px] px-4 py-3">
                       <button
                         onClick={() => setViewing(t)}

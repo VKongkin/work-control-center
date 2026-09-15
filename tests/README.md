@@ -1,16 +1,16 @@
 # Test suites
 
-Seven suites, 686 checks, run against a live application.
+Seven suites, 701 checks, run against a live application.
 
 | File | Checks | What it covers |
 |---|---|---|
-| `api_suite.py` | 217 | Every endpoint and method, all 10 entities' CRUD lifecycles, validation (required, blank, enums, uniqueness, foreign keys), 404s, filters, pagination, cascade behaviour, date handling, unicode |
+| `api_suite.py` | 225 | Every endpoint and method, all 10 entities' CRUD lifecycles, validation (required, blank, enums, uniqueness, foreign keys), 404s, filters, pagination, cascade behaviour, date handling, unicode, and the meetings diary ordering and date window |
 | `ui_suite.mjs` | 156 | All 13 pages in a real browser: create/edit/delete through the forms, validation behaviour, archive/restore, unsaved-changes guard, filters, routing, keyboard, mobile layout, console errors |
 | `followups_suite.mjs` | 96 | The follow-ups page in depth: all three waiting-for types, all five statuses, quick actions, the four dates, overdue signalling, alert rules, field-level update integrity |
 | `features_suite.mjs` | 42 | Detail views, file uploads to tasks, tool folders, the sandboxed tool runner, pinning |
 | `sync_suite.mjs` | 25 | Live data: a Directory record created, renamed, archived, restored or deleted must reach every form that references it without a page refresh |
 | `calendar_suite.py` | 96 | Calendar sync against a feed the suite serves itself: recurrence expansion, idempotence, the edit-protection rule, the delete guard, cancellation instead of deletion, disconnecting, timezone conversion (including changing a calendar's zone after the fact), and the automatic-sync schedule — due/not-due, the off switch, interval limits, and the failure backoff. The Microsoft path is checked as far as its own boundary — the Graph calls themselves are not exercised (see the note below) |
-| `calendar_ui_suite.mjs` | 54 | The same journey through the browser: connecting, testing, syncing, editing a synced meeting, releasing a field, disconnecting, a background sync appearing in an open page without a reload, and a browser running at UTC+7 to prove a 03:30Z meeting reads as 10:30 |
+| `calendar_ui_suite.mjs` | 61 | The same journey through the browser: connecting, testing, syncing, editing a synced meeting, releasing a field, disconnecting, a background sync appearing in an open page without a reload, the agenda's grouping, scope filter and search, and a browser running at UTC+7 to prove a 03:30Z meeting reads as 10:30 |
 
 ## Running them
 

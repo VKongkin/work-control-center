@@ -147,7 +147,7 @@ try {
 
   section('Synced meetings on the Meetings page');
   await go('/meetings');
-  const rows = page.locator('tbody tr', { hasText: 'Weekly Change Board' });
+  const rows = page.locator('[data-row-id]', { hasText: 'Weekly Change Board' });
   check('all three occurrences arrived', (await rows.count()) === 3, `${await rows.count()}`);
   const first = rows.first();
   check('marked as coming from a calendar',
@@ -163,6 +163,44 @@ try {
     ((await del.getAttribute('title')) ?? '').toLowerCase().includes('outlook'),
     await del.getAttribute('title'));
 
+  section('The agenda puts today first');
+  // Meetings are seeded 2+ days out by this suite, so "Today" is legitimately
+  // empty here; what matters is that the sections exist, are in diary order,
+  // and that the scope and search controls narrow them.
+  const body = await bodyText();
+  check('an Up next card names the soonest meeting',
+    /Up next|Happening now/.test(body), body.slice(0, 0));
+  check('meetings are grouped by day, not listed flat',
+    /THE NEXT 7 DAYS|Tomorrow|Later/i.test(body), '');
+
+  const order = await page.locator('[data-row-id]').evaluateAll((els) =>
+    els.map((e) => e.querySelector('button')?.textContent?.trim() ?? ''));
+  check('the agenda renders rows', order.length >= 3, JSON.stringify(order.slice(0, 4)));
+
+  await page.locator('button:has-text("Today")').first().click();
+  await page.waitForTimeout(600);
+  check('the Today filter narrows to today alone',
+    (await page.locator('[data-row-id]').count()) === 0 ||
+    !(await bodyText()).includes('THE NEXT 7 DAYS'), '');
+
+  await page.locator('button:has-text("All")').first().click();
+  await page.waitForTimeout(600);
+  check('All brings everything back', (await page.locator('[data-row-id]').count()) >= 3,
+    String(await page.locator('[data-row-id]').count()));
+
+  await page.locator('#meeting-search').fill('Weekly Change');
+  await page.waitForTimeout(500);
+  const found = await page.locator('[data-row-id]').count();
+  check('search narrows the agenda', found === 3, String(found));
+  await page.locator('#meeting-search').fill('zzz-no-such-meeting');
+  await page.waitForTimeout(500);
+  check('a search with no matches says so',
+    (await bodyText()).includes('Nothing matches'), '');
+  await page.locator('button[aria-label="Clear search"]').click();
+  await page.waitForTimeout(500);
+  await page.locator('button:has-text("Upcoming")').first().click();
+  await page.waitForTimeout(600);
+
   section('Editing a synced meeting keeps your version');
   await first.locator('button[aria-label="Edit"]').click();
   await page.waitForTimeout(600);
@@ -173,7 +211,7 @@ try {
   await dialog().locator('button:has-text("Save changes")').click();
   await page.waitForTimeout(1400);
 
-  const editedRow = page.locator('tbody tr', { hasText: 'Weekly Change Board' }).first();
+  const editedRow = page.locator('[data-row-id]', { hasText: 'Weekly Change Board' }).first();
   check('the kept-edit badge appears', (await editedRow.textContent()).includes('kept'),
     await editedRow.textContent());
 
@@ -185,7 +223,7 @@ try {
   check('the title follows the calendar', synced.includes('Board (renamed upstream)'));
   check('your edit is reported as kept', synced.includes('of your edits kept'), synced.slice(0, 0));
 
-  await page.locator('tbody tr', { hasText: 'Board (renamed upstream)' }).first()
+  await page.locator('[data-row-id]', { hasText: 'Board (renamed upstream)' }).first()
     .locator('button').first().click();
   await page.waitForTimeout(700);
   const detail = await dialog().textContent();
@@ -205,7 +243,7 @@ try {
   await page.waitForTimeout(2800);
   // The table shows a Join link in place of the location for online meetings,
   // so the released value has to be read from the record itself.
-  await page.locator('tbody tr', { hasText: 'Board (renamed upstream)' }).first()
+  await page.locator('[data-row-id]', { hasText: 'Board (renamed upstream)' }).first()
     .locator('button').first().click();
   await page.waitForTimeout(700);
   const released = await dialog().textContent();
@@ -214,7 +252,7 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(500);
   check('the kept-edit badge is gone from that row',
-    !(await page.locator('tbody tr', { hasText: 'Board (renamed upstream)' })
+    !(await page.locator('[data-row-id]', { hasText: 'Board (renamed upstream)' })
       .first().textContent()).includes('kept'));
 
   section('The page notices a sync it did not start');
@@ -231,7 +269,7 @@ try {
     (await bodyText()).includes('Syncs every 30 min'), '');
 
   await go('/meetings');
-  const beforeCount = await page.locator('tbody tr').count();
+  const beforeCount = await page.locator('[data-row-id]').count();
   // a new meeting appears upstream, and the server syncs it - not the page
   state.body = feed('Board (renamed upstream)').replace('END:VCALENDAR', `BEGIN:VEVENT
 UID:arrived@wcc-test
@@ -251,7 +289,7 @@ END:VCALENDAR`);
   await page.waitForTimeout(2500);
   check('it appears without a manual refresh',
     (await bodyText()).includes('Arrived while you were looking'),
-    `rows before ${beforeCount}, now ${await page.locator('tbody tr').count()}`);
+    `rows before ${beforeCount}, now ${await page.locator('[data-row-id]').count()}`);
   check('and the page says what changed',
     (await bodyText()).includes('Calendar synced'), '');
 
@@ -261,7 +299,7 @@ END:VCALENDAR`);
   await dialog().locator('#f-title').fill('UI mine only');
   await dialog().locator('button:has-text("Create meeting")').click();
   await page.waitForTimeout(1400);
-  const mine = page.locator('tbody tr', { hasText: 'UI mine only' }).first();
+  const mine = page.locator('[data-row-id]', { hasText: 'UI mine only' }).first();
   check('no calendar badge', !(await mine.textContent()).includes('Calendar'));
   check('delete is allowed', !(await mine.locator('button[aria-label="Delete"]').isDisabled()));
 
@@ -276,7 +314,7 @@ END:VCALENDAR`);
   check('the connection is gone', !(await bodyText()).includes('UI test calendar'));
 
   await go('/meetings');
-  const orphan = page.locator('tbody tr', { hasText: 'Board (renamed upstream)' }).first();
+  const orphan = page.locator('[data-row-id]', { hasText: 'Board (renamed upstream)' }).first();
   check('the meetings are still there', (await orphan.count()) > 0);
   check('and are now deletable',
     !(await orphan.locator('button[aria-label="Delete"]').isDisabled()));
@@ -285,7 +323,7 @@ END:VCALENDAR`);
   for (const title of ['Board (renamed upstream)', 'UI mine only',
                        'Arrived while you were looking']) {
     for (;;) {
-      const row = page.locator('tbody tr', { hasText: title }).first();
+      const row = page.locator('[data-row-id]', { hasText: title }).first();
       if ((await row.count()) === 0) break;
       await row.locator('button[aria-label="Delete"]').click();
       await page.waitForTimeout(400);
@@ -342,15 +380,15 @@ END:VCALENDAR
     await tzPage.goto(BASE + '/meetings', { waitUntil: 'networkidle' });
     await tzPage.waitForTimeout(700);
 
-    const morning = await tzPage.locator('tbody tr', { hasText: 'UI morning meeting' })
+    const morning = await tzPage.locator('[data-row-id]', { hasText: 'UI morning meeting' })
       .first().textContent();
     check('a 03:30Z meeting reads as 10:30 AM', /10:30/.test(morning), morning);
     check('and not as 03:30', !/03:30/.test(morning), morning);
 
-    const holiday = await tzPage.locator('tbody tr', { hasText: 'UI public holiday' })
+    const holiday = await tzPage.locator('[data-row-id]', { hasText: 'UI public holiday' })
       .first().textContent();
     check('an all-day entry says so instead of showing a time',
-      holiday.includes('all day'), holiday);
+      holiday.includes('All day') && !/\d{1,2}:\d{2}/.test(holiday), holiday);
     check('and does not slide onto the previous evening',
       !/11:00|12:00 AM/.test(holiday), holiday);
 
@@ -365,7 +403,7 @@ END:VCALENDAR
     await tzPage.waitForTimeout(600);
     for (const title of ['UI morning meeting', 'UI public holiday']) {
       for (;;) {
-        const row = tzPage.locator('tbody tr', { hasText: title }).first();
+        const row = tzPage.locator('[data-row-id]', { hasText: title }).first();
         if ((await row.count()) === 0) break;
         await row.locator('button[aria-label="Delete"]').click();
         await tzPage.waitForTimeout(400);
