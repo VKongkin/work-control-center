@@ -301,7 +301,7 @@ const projOpts = (await comboLabels('f-project_id')).length;
 if (projOpts > 0) await comboPick('f-project_id', { index: 0 });
 await page.locator('button:has-text("Create task")').click();
 await page.waitForTimeout(1400);
-const wfRow = page.locator('tbody tr', { hasText: tName }).first();
+const wfRow = page.locator('[data-row-id]', { hasText: tName }).first();
 check('task created with relations', await wfRow.count() > 0);
 check('overdue date is highlighted', await wfRow.locator('.text-red-600').count() > 0);
 check('priority badge shows P0', (await wfRow.textContent()).includes('P0'));
@@ -309,7 +309,7 @@ await wfRow.locator('select').selectOption('IN_PROGRESS');
 await page.waitForTimeout(1300);
 await go('/tasks');
 check('inline status change persisted',
-  (await page.locator('tbody tr', { hasText: tName }).first().locator('select').inputValue()) === 'IN_PROGRESS');
+  (await page.locator('[data-row-id]', { hasText: tName }).first().locator('select').inputValue()) === 'IN_PROGRESS');
 await go('/');
 check('dashboard counts the new critical task',
   /Critical/.test(await page.locator('body').textContent()));
@@ -321,20 +321,93 @@ await page.locator('button:has-text("Search")').click();
 await page.waitForTimeout(1400);
 check('search finds it', (await page.locator('body').textContent()).includes(tName));
 await go('/tasks');
-await page.locator('tbody tr', { hasText: tName }).first().locator('button[aria-label="Delete"]').click();
+await page.locator('[data-row-id]', { hasText: tName }).first().locator('button[aria-label="Delete"]').click();
 await page.waitForTimeout(400);
 await dialog().locator('button:has-text("Delete")').last().click();
 await page.waitForTimeout(1300);
-check('cleanup deleted', !(await page.locator('tbody').textContent()).includes(tName));
+check('cleanup deleted', !(await page.locator('[data-list]').textContent()).includes(tName));
+
+section('Tasks lead with what is late');
+await go('/tasks');
+{
+  const body = await page.locator('body').textContent();
+  check('tasks are grouped by urgency, not listed flat',
+    /OVERDUE|DUE TODAY|THE NEXT 7 DAYS|NO DUE DATE/i.test(body), '');
+  // Read the group headings themselves, in DOM order. Searching the whole page
+  // for the words matches things like "Later" inside unrelated copy.
+  const EXPECTED = ['Overdue', 'Due today', 'The next 7 days', 'Later', 'No due date'];
+  const heads = (await page.locator('h2').allTextContents())
+    .map((h) => h.replace(/\d+$/, '').trim())
+    .filter((h) => EXPECTED.includes(h));
+  const ranks = heads.map((h) => EXPECTED.indexOf(h));
+  check('the groups run most-urgent first',
+    ranks.length >= 2 && ranks.every((v, i) => i === 0 || v > ranks[i - 1]),
+    JSON.stringify(heads));
+  check('finished work is folded away, not listed',
+    (await page.locator('button[aria-expanded]', { hasText: 'Done' }).count()) > 0, '');
+  check('each row still offers the inline status control',
+    (await page.locator('[data-row-id] select').count()) > 0, '');
+}
+
+section('Issues lead with the worst');
+await go('/issues');
+{
+  const body = await page.locator('body').textContent();
+  // Read the headings in DOM order rather than searching the page text: "Low"
+  // occurs inside "Follow-ups" in the sidebar, which made an earlier version of
+  // this check pass on nonsense.
+  const SEVERITIES = ['Critical', 'High', 'Medium', 'Low'];
+  const heads = (await page.locator('h2').allTextContents())
+    .map((h) => h.replace(/\d+$/, '').trim())
+    .filter((h) => SEVERITIES.includes(h));
+  check('issues are grouped by severity', heads.length >= 2, JSON.stringify(heads));
+  const ranks = heads.map((h) => SEVERITIES.indexOf(h));
+  check('worst severity comes first',
+    ranks.length >= 2 && ranks.every((v, i) => i === 0 || v > ranks[i - 1]),
+    JSON.stringify(heads));
+
+  const openCount = await page.locator('[data-row-id]').count();
+  check('the page opens on what is still open', openCount > 0, String(openCount));
+  check('a severity filter is offered', (await page.locator('#f-filter-severity').count()) === 1);
+  check('a system filter is offered', (await page.locator('#f-filter-system').count()) === 1);
+  check('a search box is offered', (await page.locator('#issue-search').count()) === 1);
+
+  await page.locator('button:has-text("All")').first().click();
+  await page.waitForTimeout(700);
+  check('the All scope reaches the URL', page.url().includes('scope=all'), page.url());
+  check('resolved issues are folded away there',
+    (await page.locator('button[aria-expanded]', { hasText: 'Resolved' }).count()) > 0, '');
+
+  await page.locator('#f-filter-severity').selectOption('CRITICAL');
+  await page.waitForTimeout(1100);
+  check('the severity filter reaches the URL', page.url().includes('severity=CRITICAL'), page.url());
+  const groups = await page.locator('h2').allTextContents();
+  check('only that severity is left',
+    groups.every((g) => !/^(High|Medium|Low)\b/.test(g.trim())), JSON.stringify(groups));
+
+  await page.locator('#f-filter-severity').selectOption('');
+  await page.waitForTimeout(1000);
+  await page.locator('#issue-search').fill('zzz-no-such-issue');
+  await page.waitForTimeout(600);
+  check('a search with no matches says so',
+    (await page.locator('body').textContent()).includes('Nothing matches'), '');
+  await page.locator('#issue-search').fill('');
+  await page.waitForTimeout(500);
+}
 
 section('Filters');
 await go('/tasks');
 await page.locator('#f-filter-status').selectOption('COMPLETED');
 await page.waitForTimeout(1200);
 check('status filter hits the URL', page.url().includes('status=COMPLETED'));
-const rows = await page.locator('tbody tr').count();
+// Completed work is folded away by design, so it has to be opened to be read.
+const doneFold = page.locator('button[aria-expanded]', { hasText: 'Done' }).first();
+if (await doneFold.count()) { await doneFold.click(); await page.waitForTimeout(500); }
+// Tasks is grouped by urgency now, not a table; the row markers are
+// what both shapes have in common.
+const rows = await page.locator('[data-row-id]').count();
 if (rows) {
-  const vals = await page.locator('tbody tr select').evaluateAll(els => els.map(e => e.value));
+  const vals = await page.locator('[data-row-id] select').evaluateAll(els => els.map(e => e.value));
   check('only matching rows shown', vals.every(v => v === 'COMPLETED'), vals.join(','));
 } else check('only matching rows shown', true, '(none completed)');
 await page.locator('#f-filter-priority').selectOption('P0_CRITICAL');

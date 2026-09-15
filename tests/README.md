@@ -1,11 +1,11 @@
 # Test suites
 
-Seven suites, 701 checks, run against a live application.
+Seven suites, 720 checks, run against a live application.
 
 | File | Checks | What it covers |
 |---|---|---|
-| `api_suite.py` | 225 | Every endpoint and method, all 10 entities' CRUD lifecycles, validation (required, blank, enums, uniqueness, foreign keys), 404s, filters, pagination, cascade behaviour, date handling, unicode, and the meetings diary ordering and date window |
-| `ui_suite.mjs` | 156 | All 13 pages in a real browser: create/edit/delete through the forms, validation behaviour, archive/restore, unsaved-changes guard, filters, routing, keyboard, mobile layout, console errors |
+| `api_suite.py` | 229 | Every endpoint and method, all 10 entities' CRUD lifecycles, validation (required, blank, enums, uniqueness, foreign keys), 404s, filters, pagination, cascade behaviour, date handling, unicode, the meetings diary ordering and date window, and the issues severity ordering and filters |
+| `ui_suite.mjs` | 171 | All 13 pages in a real browser: create/edit/delete through the forms, validation behaviour, archive/restore, unsaved-changes guard, filters, routing, keyboard, mobile layout, console errors, and that Tasks and Issues group most-urgent-first with their finished work folded away |
 | `followups_suite.mjs` | 96 | The follow-ups page in depth: all three waiting-for types, all five statuses, quick actions, the four dates, overdue signalling, alert rules, field-level update integrity |
 | `features_suite.mjs` | 42 | Detail views, file uploads to tasks, tool folders, the sandboxed tool runner, pinning |
 | `sync_suite.mjs` | 25 | Live data: a Directory record created, renamed, archived, restored or deleted must reach every form that references it without a page refresh |

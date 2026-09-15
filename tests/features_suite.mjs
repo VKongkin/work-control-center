@@ -30,7 +30,7 @@ await D().locator('#f-notes').fill('A note on the record');
 await p.locator('button:has-text("Create task")').click();
 await p.waitForTimeout(1600);
 
-await p.locator('tbody tr', { hasText: taskTitle }).first().locator('button').first().click();
+await p.locator('[data-row-id]', { hasText: taskTitle }).first().locator('button').first().click();
 await p.waitForTimeout(700);
 const dt = await D().textContent();
 check('the record opens read-only', dt.includes(taskTitle));
@@ -56,9 +56,9 @@ section('Every list opens a detail view, not an edit form');
 for (const [path, btn] of [['/projects','New Project'], ['/issues','New Issue'], ['/meetings','New Meeting'],
                            ['/people','New Person'], ['/vendors','New Vendor']]) {
   await go(path);
-  const rows = await p.locator('tbody tr').count();
+  const rows = await p.locator('[data-row-id]').count();
   if (!rows) { check(`${path}: detail view`, true, '(no rows)'); continue; }
-  await p.locator('tbody tr').first().locator('button').first().click();
+  await p.locator('[data-row-id]').first().locator('button').first().click();
   await p.waitForTimeout(650);
   const open = (await D().count()) > 0;
   const noInputs = (await D().locator('input:not([type=file]), textarea, select').count()) === 0;
@@ -71,7 +71,7 @@ for (const [path, btn] of [['/projects','New Project'], ['/issues','New Issue'],
 /* ════════════════════════════ attachments ════════════════════════════ */
 section('Attaching files to a task');
 await go('/tasks');
-await p.locator('tbody tr', { hasText: taskTitle }).first().locator('button').first().click();
+await p.locator('[data-row-id]', { hasText: taskTitle }).first().locator('button').first().click();
 await p.waitForTimeout(700);
 check('upload area offers a file picker', (await D().locator('button:has-text("Choose files")').count()) === 1);
 check('a task is not offered folder upload', (await D().locator('button:has-text("Choose folder")').count()) === 0);

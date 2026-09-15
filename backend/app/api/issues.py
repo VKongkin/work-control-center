@@ -1,5 +1,6 @@
 """Issues API routes"""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
@@ -39,14 +40,39 @@ IssueSchemaOut = make_lenient(IssueSchema)
 
 router = APIRouter()
 
+# Severity is a string column, so "worst first" has to be spelled out rather
+# than left to alphabetical order, which would put CRITICAL after... nothing,
+# but HIGH before LOW before MEDIUM.
+SEVERITY_ORDER = case(
+    {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3},
+    value=Issue.severity,
+    else_=9,
+)
+
 
 @router.get("", response_model=List[IssueSchemaOut])
-def get_issues(db: Session = Depends(get_db), status: Optional[str] = Query(None), skip: int = Query(0), limit: int = Query(100)):
-    """Get all issues"""
+def get_issues(
+    db: Session = Depends(get_db),
+    status: Optional[str] = Query(None),
+    severity: Optional[str] = Query(None),
+    system_id: Optional[int] = Query(None),
+    skip: int = Query(0),
+    limit: int = Query(100),
+):
+    """Get all issues, narrowed by the things the page actually filters on."""
     query = db.query(Issue)
     if status:
         query = query.filter(Issue.status == status)
-    return query.order_by(Issue.created_at.desc()).offset(skip).limit(limit).all()
+    if severity:
+        query = query.filter(Issue.severity == severity)
+    if system_id:
+        query = query.filter(Issue.system_id == system_id)
+    # Worst first, then newest. The page groups by severity anyway, but an
+    # unfiltered read of this endpoint should still lead with what matters.
+    return (
+        query.order_by(SEVERITY_ORDER, Issue.created_at.desc())
+        .offset(skip).limit(limit).all()
+    )
 
 
 @router.post("", response_model=IssueSchemaOut)

@@ -7,11 +7,13 @@ import { useResource, clean, toId } from '../hooks/useResource';
 import { useLookups } from '../hooks/useLookups';
 import { useForm } from '../hooks/useForm';
 import DetailView from '../components/DetailView';
+import GroupedList from '../components/GroupedList';
 import {
   Badge, Button, ComboboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
   ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from '../components/ui';
 import { PRIORITIES, TASK_STATUSES, fmtDate, isOverdue, toDateInput } from '../lib/constants';
+import { daysLate, dueLabel, groupTasks, isDone } from '../lib/grouping';
 import { maxLength, required, requiredWhen, saneDate } from '../lib/validators';
 
 const RULES = {
@@ -192,7 +194,9 @@ export default function TasksPage() {
 
       {loading ? (
         <Spinner label="Loading tasks…" />
-      ) : visible.length === 0 ? (
+      ) : (
+        <div data-list>
+        {visible.length === 0 ? (
         <EmptyState
           title={items.length ? 'No tasks match these filters' : 'No tasks yet'}
           hint={items.length ? 'Try clearing a filter.' : 'Create your first task to get started.'}
@@ -205,80 +209,82 @@ export default function TasksPage() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50 text-left text-slate-600">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Task</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Priority</th>
-                  <th className="px-4 py-3 font-medium">Due</th>
-                  <th className="px-4 py-3 font-medium">Owner</th>
-                  <th className="px-4 py-3 font-medium">Project</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              {/* Same markers every list in the app carries, so anything
-                  reading the page need not know its shape. */}
-              <tbody data-list className="divide-y divide-slate-100">
-                {visible.map((t) => (
-                  <tr key={t.id} data-row-id={t.id} className="hover:bg-slate-50/70">
-                    <td className="max-w-[320px] px-4 py-3">
-                      <button
-                        onClick={() => setViewing(t)}
-                        className="text-left font-medium text-slate-900 hover:text-blue-700"
-                      >
-                        {t.title}
-                      </button>
-                      {t.description && (
-                        <p className="mt-0.5 truncate text-xs text-slate-500">{t.description}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {/* Changing status is the most frequent action, so it is inline. */}
-                      <select
-                        value={t.status}
-                        onChange={(e) => update(t.id, { status: e.target.value } as Partial<Task>, true)}
-                        className="rounded-lg border-0 bg-transparent py-1 pl-1 pr-7 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                      >
-                        {TASK_STATUSES.map((s) => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3"><Badge value={t.priority} /></td>
-                    <td className="px-4 py-3">
-                      <span className={isOverdue(t.due_date, t.status) ? 'font-medium text-red-600' : 'text-slate-600'}>
-                        {fmtDate(t.due_date)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {lk.nameOf('people', t.responsible_person_id)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {lk.nameOf('projects', t.project_id)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" onClick={() => openEdit(t)} aria-label="Edit">
-                          <Pencil size={15} />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => setToDelete(t)}
-                          aria-label="Delete"
-                          className="text-red-600 hover:bg-red-50"
-                        >
-                          <Trash2 size={15} />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <GroupedList<Task>
+          groups={groupTasks(visible)}
+          row={(t) => (
+            <div className="flex flex-col gap-2 px-4 py-3 transition-colors hover:bg-slate-50/80 sm:flex-row sm:items-start sm:gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge value={t.priority} />
+                  <button
+                    onClick={() => setViewing(t)}
+                    className={`text-left text-sm font-medium hover:text-blue-700 ${
+                      isDone(t) ? 'text-slate-500' : 'text-slate-900'
+                    }`}
+                  >
+                    {t.title}
+                  </button>
+                  {/* How late, in words. A date column made you work that out. */}
+                  {dueLabel(t) && !isDone(t) && (
+                    <span className={`text-xs ${
+                      daysLate(t) > 0 ? 'font-medium text-red-600' : 'text-slate-400'
+                    }`}>
+                      {dueLabel(t)}
+                    </span>
+                  )}
+                </div>
+                {t.next_action && (
+                  <p className="mt-0.5 truncate text-xs text-slate-600">
+                    Next: {t.next_action}
+                  </p>
+                )}
+                {t.status === 'BLOCKED' && t.blocked_reason && (
+                  <p className="mt-0.5 truncate text-xs text-red-600">
+                    Blocked: {t.blocked_reason}
+                  </p>
+                )}
+                {(lk.nameOf('people', t.responsible_person_id) !== '—' ||
+                  lk.nameOf('projects', t.project_id) !== '—') && (
+                  <p className="mt-0.5 truncate text-xs text-slate-500">
+                    {[lk.nameOf('people', t.responsible_person_id),
+                      lk.nameOf('projects', t.project_id)]
+                      .filter((v) => v !== '—')
+                      .join(' · ')}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                {/* Changing status is the most frequent action, so it stays inline. */}
+                <select
+                  value={t.status}
+                  aria-label={`Status of ${t.title}`}
+                  onChange={(e) => update(t.id, { status: e.target.value } as Partial<Task>, true)}
+                  className="rounded-lg border-0 bg-transparent py-1 pl-1 pr-7 text-xs font-medium text-slate-700 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                >
+                  {TASK_STATUSES.map((s) => (
+                    <option key={s.value} value={s.value}>{s.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => openEdit(t)}
+                  aria-label="Edit"
+                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  onClick={() => setToDelete(t)}
+                  aria-label="Delete"
+                  className="rounded-lg p-1.5 text-red-500 transition hover:bg-red-50 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          )}
+        />
+        )}
         </div>
       )}
 

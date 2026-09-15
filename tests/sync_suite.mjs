@@ -115,7 +115,7 @@ section('Renaming a Directory record updates the label shown elsewhere');
 const personName = made['Person'];
 const renamed = personName + ' RENAMED';
 await nav('People');
-await p.locator('tbody tr', { hasText: personName }).first().locator('button[aria-label="Edit"]').click();
+await p.locator('[data-row-id]', { hasText: personName }).first().locator('button[aria-label="Edit"]').click();
 await p.waitForTimeout(600);
 await D().locator('#f-name').fill(renamed);
 await p.locator('button:has-text("Save changes")').click();
@@ -137,11 +137,11 @@ await comboPick('f-responsible_person_id', { label: renamed });
 await p.locator('button:has-text("Create task")').click();
 await p.waitForTimeout(1600);
 check('task row shows the owner',
-  (await p.locator('tbody tr', { hasText: taskTitle }).first().textContent()).includes(renamed));
+  (await p.locator('[data-row-id]', { hasText: taskTitle }).first().textContent()).includes(renamed));
 
 const again = renamed + ' AGAIN';
 await nav('People');
-await p.locator('tbody tr', { hasText: renamed }).first().locator('button[aria-label="Edit"]').click();
+await p.locator('[data-row-id]', { hasText: renamed }).first().locator('button[aria-label="Edit"]').click();
 await p.waitForTimeout(600);
 await D().locator('#f-name').fill(again);
 await p.locator('button:has-text("Save changes")').click();
@@ -149,14 +149,14 @@ await p.waitForTimeout(1600);
 await nav('Tasks');
 await p.waitForTimeout(900);
 check('task row picks up the rename without a refresh',
-  (await p.locator('tbody tr', { hasText: taskTitle }).first().textContent()).includes(again),
+  (await p.locator('[data-row-id]', { hasText: taskTitle }).first().textContent()).includes(again),
   'still showing the stale name');
 made['Person'] = again;
 
 section('Archiving removes a record from the pickers immediately');
 await nav('Vendors');
 const vName = made['Vendor'];
-await p.locator('tbody tr', { hasText: vName }).first().locator('button[aria-label="Archive"]').click();
+await p.locator('[data-row-id]', { hasText: vName }).first().locator('button[aria-label="Archive"]').click();
 await p.waitForTimeout(450);
 await D().locator('button:has-text("Archive")').last().click();
 await p.waitForTimeout(1600);
@@ -166,7 +166,7 @@ check('archived vendor disappears from the Task form',
 await nav('Vendors');
 await p.locator('input[type="checkbox"]').first().check();
 await p.waitForTimeout(1400);
-await p.locator('tbody tr', { hasText: vName }).first().locator('button[aria-label="Restore"]').click();
+await p.locator('[data-row-id]', { hasText: vName }).first().locator('button[aria-label="Restore"]').click();
 await p.waitForTimeout(1600);
 check('restored vendor comes back to the Task form',
   await offeredIn('Tasks', 'New Task', 'f-vendor_id', vName));
@@ -174,7 +174,7 @@ check('restored vendor comes back to the Task form',
 section('Deleting removes it from the pickers immediately');
 await nav('Categories');
 const cName = made['Category'];
-await p.locator('tbody tr', { hasText: cName }).first().locator('button[aria-label="Delete"]').click();
+await p.locator('[data-row-id]', { hasText: cName }).first().locator('button[aria-label="Delete"]').click();
 await p.waitForTimeout(450);
 await D().locator('button:has-text("Delete")').last().click();
 await p.waitForTimeout(1600);

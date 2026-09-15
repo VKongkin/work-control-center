@@ -315,6 +315,35 @@ if s_ == 200:
 for i in made_ids:
     call("DELETE", f"/api/meetings/{i}")
 
+section("Issues lead with the worst")
+made = []
+for sev, title in (("LOW", "SEV low probe"), ("CRITICAL", "SEV critical probe"), ("HIGH", "SEV high probe")):
+    s_, i = call("POST", "/api/issues", {"title": title, "severity": sev})
+    if s_ == 200: made.append(i["id"])
+
+s_, rows = call("GET", "/api/issues?limit=500")
+ours = [r["severity"] for r in rows if str(r["title"]).startswith("SEV ")]
+check("severity orders worst first, not alphabetically",
+      ours == ["CRITICAL", "HIGH", "LOW"], str(ours))
+
+s_, rows = call("GET", "/api/issues?limit=500&severity=CRITICAL")
+ours = [r["title"] for r in rows if str(r["title"]).startswith("SEV ")]
+check("the severity filter narrows it", ours == ["SEV critical probe"], str(ours))
+
+s_, systems = call("GET", "/api/systems?limit=1")
+if systems:
+    sid = systems[0]["id"]
+    call("PUT", f"/api/issues/{made[0]}", {"system_id": sid})
+    s_, rows = call("GET", f"/api/issues?limit=500&system_id={sid}")
+    titles = [r["title"] for r in rows if str(r["title"]).startswith("SEV ")]
+    check("the system filter narrows it", titles == ["SEV low probe"], str(titles))
+    s_, rows = call("GET", f"/api/issues?limit=500&system_id={sid}&severity=HIGH")
+    titles = [r["title"] for r in rows if str(r["title"]).startswith("SEV ")]
+    check("severity and system combine", titles == [], str(titles))
+
+for i in made:
+    call("DELETE", f"/api/issues/{i}")
+
 print(f"\n{'='*52}\n  \033[1m{ok} passed, {fail} failed\033[0m\n{'='*52}")
 if failures:
     print("Failed:"); [print("  -", f) for f in failures]
