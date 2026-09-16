@@ -156,8 +156,21 @@ file next to the compose file:
 ```bash
 FRONTEND_PORT=3001
 API_PORT=8001
+DB_PORT=5433
+ADMINER_PORT=8081
 POSTGRES_PASSWORD=something-better
 ```
+
+Moving a port is safe and needs no rebuild — `docker compose up -d` recreates
+the container with the new mapping. Nothing inside the app is affected either:
+the browser calls the API at the relative path `/api`, which nginx proxies to
+`backend:8000` on Docker's own network, and that internal port never changes.
+Only the addresses you type change, plus the agent URL if you have set one up.
+
+Avoid ports above 49151 on Windows — that is the dynamic range the OS hands out
+to outbound connections, so it will collide with you eventually. If a port
+refuses to bind while nothing appears to be listening, see the Hyper-V reserved
+ranges note in `INSTALLATION.md`.
 
 Set `POSTGRES_PASSWORD` **before** the first start. Postgres only reads it when
 it initialises the volume; changing it later has no effect until you

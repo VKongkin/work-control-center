@@ -106,21 +106,94 @@ running container has, and what to do about it if not.
 
 ## Troubleshooting Installation
 
-### Ports Already in Use
+### Ports already in use
 
-If you get "Address already in use" error:
+Symptom: `Bind for 0.0.0.0:8000 failed: port is already allocated`, or the app
+starts but you reach something else entirely.
+
+**First, find out what owns it. Do not kill it** — on a work machine that port
+usually belongs to something someone needs.
+
+Windows (PowerShell):
+
+```powershell
+Get-NetTCPConnection -LocalPort 8000 -State Listen |
+  ForEach-Object { Get-Process -Id $_.OwningProcess }
+
+# or the old way
+netstat -ano | findstr :8000
+```
+
+macOS and Linux:
 
 ```bash
-# Find which process is using the port
-lsof -i :3000   # Frontend
-lsof -i :8000   # Backend API
-lsof -i :5432   # Database
-
-# Kill the process
-kill -9 <PID>
-
-# Or change ports in docker-compose.yml
+lsof -i :8000
 ```
+
+**Then move WCC, rather than moving the other application.** Every port is a
+default, overridden in `.env`:
+
+```env
+FRONTEND_PORT=3100
+API_PORT=8100
+DB_PORT=5532
+ADMINER_PORT=8180
+```
+
+```bash
+docker compose up -d      # recreates the containers with the new mapping
+```
+
+No rebuild, and nothing inside the app needs to change. The browser calls the
+API at the relative path `/api`, which nginx proxies to `backend:8000` on
+Docker's own network — that internal port never changes, so the UI does not care
+which port you published it on.
+
+What does change:
+
+| | |
+|---|---|
+| The app | `http://localhost:3100` |
+| API docs | `http://localhost:8100/docs` |
+| The agent URL for Copilot or VS Code | `http://<host>:8100/api/agent/mcp` |
+| `make agent-check` | reads `API_PORT` from `.env`, so it follows by itself |
+
+Pick something in the 1024–49151 range. Above 49152 is Windows' dynamic range,
+where the OS hands out ports to outbound connections and will eventually collide
+with you.
+
+**A Windows-specific trap.** If a port fails to bind while `Get-NetTCPConnection`
+shows nothing listening, Hyper-V has probably reserved a block containing it —
+this is common on machines running Docker Desktop or WSL:
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+If your port is inside one of those ranges, no process holds it and nothing can
+free it. Choose a port outside every listed range.
+
+### The hostname is shared with other applications
+
+If `wcc` has to live on a server that already serves other things, the answer is
+not a free port — it is a name. Ask for a DNS record (`wcc.bank.local`, a CNAME
+to the host) and put a reverse proxy in front that routes by `Host` header:
+
+```nginx
+server {
+    listen 80;
+    server_name wcc.bank.local;
+    location / { proxy_pass http://127.0.0.1:3000; }
+}
+```
+
+Then the URL is `http://wcc.bank.local` with no port at all, other apps on the
+same box keep their own names, and you can change WCC's internal port whenever
+you like without telling anyone.
+
+This is worth doing early if Copilot Studio is the destination: that route needs
+a hostname and HTTPS regardless, so a name now saves reconfiguring every client
+later. See `COPILOT.md`.
 
 ### Docker Daemon Not Running
 
