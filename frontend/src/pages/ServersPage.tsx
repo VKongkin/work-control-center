@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AlertTriangle, ChevronRight, Copy, Eye, EyeOff, History, KeyRound, Pencil,
-  Plus, Search, Server as ServerIcon, Trash2, X,
+  AlertTriangle, ChevronRight, Copy, Eye, EyeOff, FolderSync, History, KeyRound,
+  Monitor, Pencil, Plus, Search, Server as ServerIcon, Terminal, Trash2, X,
 } from 'lucide-react';
 import { serverApi, apiError } from '../api/client';
 import { useToast } from '../components/Toast';
@@ -11,7 +11,8 @@ import {
   Button, ConfirmDialog, EmptyState, ErrorBanner, ErrorSummary, Modal, PageHeader,
   SelectField, Spinner, TextAreaField, TextField,
 } from '../components/ui';
-import { ServerAccount, SecretAccessEntry, Server, VaultStatus } from '../types';
+import { ServerAccount, SecretAccessEntry, Server, VaultStatus, ConnectMethod } from '../types';
+import { copyText, downloadText } from '../lib/clipboard';
 import { fmtDate } from '../lib/constants';
 import { maxLength, required } from '../lib/validators';
 
@@ -40,8 +41,21 @@ const ORDER = ['DC', 'DR', 'UAT', 'SIT', 'DEV', 'OTHER'];
 
 const blankServer = {
   name: '', hostname: '', ip_address: '', environment: 'DC', os: '', role: '',
-  system_id: '', notes: '',
+  ssh_port: '', rdp_port: '', system_id: '', notes: '',
 };
+
+/** Which clients to offer, and in what order, for a given box. */
+const CONNECTIONS: { method: ConnectMethod; label: string; hint: string; Icon: any }[] = [
+  { method: 'rdp', label: 'Remote Desktop', hint: 'Windows', Icon: Monitor },
+  { method: 'sftp', label: 'WinSCP', hint: 'files', Icon: FolderSync },
+  { method: 'ssh', label: 'MobaXterm', hint: 'shell', Icon: Terminal },
+];
+
+/** A Windows box leads with RDP; anything else leads with a shell. */
+function connectionsFor(server: Server) {
+  const windows = /win/i.test(server.os ?? '');
+  return windows ? CONNECTIONS : [...CONNECTIONS.slice(1), CONNECTIONS[0]];
+}
 const blankAccount = {
   username: '', account_type: 'LOCAL', purpose: '', vault_location: '', notes: '',
 };
@@ -123,6 +137,8 @@ export default function ServersPage() {
     serverForm.reset({
       name: s.name, hostname: s.hostname ?? '', ip_address: s.ip_address ?? '',
       environment: s.environment, os: s.os ?? '', role: s.role ?? '',
+      ssh_port: s.ssh_port ? String(s.ssh_port) : '',
+      rdp_port: s.rdp_port ? String(s.rdp_port) : '',
       system_id: s.system_id ? String(s.system_id) : '', notes: s.notes ?? '',
     });
     setServerOpen(true);
@@ -137,6 +153,10 @@ export default function ServersPage() {
       system_id: v.system_id ? Number(v.system_id) : null,
       hostname: v.hostname || null, ip_address: v.ip_address || null,
       os: v.os || null, role: v.role || null, notes: v.notes || null,
+      // Blank means "the usual one", which is stored as null so the connect
+      // links can leave the port out of the URL entirely.
+      ssh_port: v.ssh_port ? Number(v.ssh_port) : null,
+      rdp_port: v.rdp_port ? Number(v.rdp_port) : null,
     };
     try {
       if (editingServer) await serverApi.update(editingServer.id, payload as any);
@@ -331,6 +351,14 @@ export default function ServersPage() {
           <TextField name="role" label="What it runs"
             value={serverForm.values.role} onChange={(v: string) => serverForm.setField('role', v)}
             placeholder="WebSphere ND 9.0.5" />
+          <TextField name="ssh_port" label="SSH port" type="number"
+            value={serverForm.values.ssh_port}
+            onChange={(v: string) => serverForm.setField('ssh_port', v)}
+            placeholder="22" hint="Only if it is not 22." />
+          <TextField name="rdp_port" label="RDP port" type="number"
+            value={serverForm.values.rdp_port}
+            onChange={(v: string) => serverForm.setField('rdp_port', v)}
+            placeholder="3389" hint="Only if it is not 3389." />
           <TextAreaField name="notes" label="Notes" className="sm:col-span-2"
             value={serverForm.values.notes} onChange={(v: string) => serverForm.setField('notes', v)} />
         </div>
@@ -502,7 +530,7 @@ function Accounts({
       ) : (
         <ul className="space-y-1.5">
           {rows.map((a) => (
-            <AccountRow key={a.id} account={a} vault={vault}
+            <AccountRow key={a.id} account={a} vault={vault} server={server}
               onEdit={() => onEdit(a)} onChanged={onChanged} />
           ))}
         </ul>
@@ -512,10 +540,11 @@ function Accounts({
 }
 
 function AccountRow({
-  account, vault, onEdit, onChanged,
+  account, vault, server, onEdit, onChanged,
 }: {
   account: ServerAccount;
   vault: VaultStatus | null;
+  server: Server;
   onEdit: () => void;
   onChanged: () => void;
 }) {
@@ -525,6 +554,60 @@ function AccountRow({
   const [setting, setSetting] = useState(false);
   const [draft, setDraft] = useState('');
   const [log, setLog] = useState<SecretAccessEntry[] | null>(null);
+  const [connecting, setConnecting] = useState<ConnectMethod | null>(null);
+  const [pasteMe, setPasteMe] = useState<string | null>(null);
+
+  /**
+   * Open this account in a desktop client.
+   *
+   * The password goes to the clipboard and nowhere else. It cannot go in the
+   * .rdp file - Windows only accepts a DPAPI blob encrypted on the machine
+   * that will use it - and it must not go in the sftp:// URL, because the
+   * browser writes navigated URLs to history. One paste is the honest cost.
+   */
+  async function connect(method: ConnectMethod) {
+    setConnecting(method);
+    try {
+      const { data } = await serverApi.connect(account.id, method);
+
+      let copied = false;
+      if (data.secret) {
+        copied = await copyText(data.secret);
+        if (!copied) setPasteMe(data.secret);   // clipboard blocked - show it
+      }
+
+      if (data.launch.kind === 'file') {
+        downloadText(data.launch.filename, data.launch.content, data.launch.mime);
+      } else {
+        // A protocol handler that is not registered simply does nothing, so
+        // this cannot navigate the page away from WCC.
+        window.location.href = data.launch.value;
+      }
+
+      const where = `${data.host}${data.port_is_default ? '' : ':' + data.port}`;
+      if (data.secret && copied) {
+        toast.success(`${data.label}: password copied — paste it when asked (${where})`);
+      } else if (data.secret_error) {
+        toast.error(`Opening ${data.label} without a password: ${data.secret_error}`);
+      } else if (data.secret) {
+        toast.success(`${data.label} opening. The clipboard is blocked, so the password is shown below.`);
+      } else {
+        toast.success(`${data.label} opening for ${data.username} at ${where}. No password is stored here.`);
+      }
+      onChanged();
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setConnecting(null);
+    }
+  }
+
+  // Shown only when the clipboard refused, and only for as long as a reveal.
+  useEffect(() => {
+    if (!pasteMe) return;
+    const t = setTimeout(() => setPasteMe(null), 60000);
+    return () => clearTimeout(t);
+  }, [pasteMe]);
 
   // A revealed password does not sit on screen indefinitely. Nothing stops
   // someone copying it, but it should not still be there after a coffee.
@@ -614,6 +697,40 @@ function AccountRow({
         </div>
       </div>
 
+      {/* One click to the client, for the thing this is actually for: getting
+          onto the box at two in the morning without hunting for a hostname. */}
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {connectionsFor(server).map(({ method, label, hint, Icon }) => (
+          <button
+            key={method}
+            onClick={() => connect(method)}
+            disabled={connecting !== null}
+            title={`Open ${label} for ${account.username} on ${server.hostname || server.ip_address || server.name}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
+          >
+            <Icon size={13} />
+            {connecting === method ? 'Opening…' : label}
+            <span className="text-slate-400">{hint}</span>
+          </button>
+        ))}
+        {account.has_secret && (
+          <span className="text-[11px] text-slate-400">
+            password is copied for you
+          </span>
+        )}
+      </div>
+
+      {pasteMe && (
+        <div className="mt-2 rounded-lg bg-amber-50 p-2 ring-1 ring-inset ring-amber-200">
+          <p className="text-[11px] font-medium text-amber-800">
+            The clipboard is not available on this page, so copy it by hand:
+          </p>
+          <code className="mt-1 block select-all break-all font-mono text-sm text-slate-900">
+            {pasteMe}
+          </code>
+        </div>
+      )}
+
       {account.vault_location && (
         <p className="mt-1 text-xs text-slate-500">
           Credential of record: <span className="text-slate-700">{account.vault_location}</span>
@@ -624,7 +741,11 @@ function AccountRow({
         <div className="mt-2 flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2">
           <code className="flex-1 select-all font-mono text-sm text-emerald-300">{revealed}</code>
           <button
-            onClick={() => { navigator.clipboard?.writeText(revealed); toast.success('Copied'); }}
+            onClick={async () => {
+              const ok = await copyText(revealed);
+              if (ok) toast.success('Copied');
+              else toast.error('The clipboard is blocked on this page — select the text instead.');
+            }}
             aria-label="Copy password"
             className="rounded p-1 text-slate-400 hover:text-white"
           >

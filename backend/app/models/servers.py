@@ -30,6 +30,12 @@ class Server(Base):
     os = Column(String(128), nullable=True)
     role = Column(String(255), nullable=True)  # what it runs: WAS, MQ, F5, ...
 
+    # Only worth storing when they are not the usual ones. Null means 22 and
+    # 3389; the connect links leave the port out entirely in that case, which
+    # is what every client expects.
+    ssh_port = Column(Integer, nullable=True)
+    rdp_port = Column(Integer, nullable=True)
+
     system_id = Column(Integer, nullable=True)
     department_id = Column(Integer, nullable=True)
     vendor_id = Column(Integer, nullable=True)
@@ -87,7 +93,7 @@ class SecretAccess(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     account_id = Column(Integer, nullable=False)
-    action = Column(String(16), nullable=False)  # SET | REVEAL | CLEAR | DENIED
+    action = Column(String(16), nullable=False)  # SET | REVEAL | CLEAR | DENIED | LAUNCH
     at = Column(DateTime, default=datetime.utcnow)
     detail = Column(String(500), nullable=True)
 

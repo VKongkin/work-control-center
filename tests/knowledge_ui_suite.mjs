@@ -17,7 +17,13 @@ const check = (n, c, d = '') => c ? (pass++, console.log(`  ${G}PASS${X}  ${n}`)
 const section = t => console.log(`\n${BD}${t}${X}`);
 
 const b = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
-const p = await b.newPage({ viewport: { width: 1440, height: 1100 } });
+// Clipboard permission is granted so the connect buttons can be checked for
+// what they actually put there, rather than only that they were clickable.
+const ctx = await b.newContext({
+  viewport: { width: 1440, height: 1100 },
+  permissions: ['clipboard-read', 'clipboard-write'],
+});
+const p = await ctx.newPage();
 p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 p.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
 
@@ -239,6 +245,62 @@ check('the access log is readable from the row', body.includes('Access log'));
 check('it shows the write', body.includes('SET'));
 check('it shows the read', body.includes('REVEAL'));
 check('the log does not print the password itself', !body.includes(SECRET));
+
+section('One click into a client');
+
+// The point of these buttons is the two-in-the-morning case: get onto the box
+// without hunting for a hostname. So check what actually reaches the clipboard
+// and what the browser is handed, not merely that a button exists.
+const accountRow = p.locator('li', { hasText: 'svc_mq_dr' }).first();
+
+check('the row offers Remote Desktop',
+  (await accountRow.locator('button:has-text("Remote Desktop")').count()) === 1);
+check('the row offers WinSCP',
+  (await accountRow.locator('button:has-text("WinSCP")').count()) === 1);
+check('the row offers MobaXterm',
+  (await accountRow.locator('button:has-text("MobaXterm")').count()) === 1);
+
+// A Linux box should not lead with Remote Desktop.
+const order = await accountRow.locator('button:has-text("WinSCP"), button:has-text("MobaXterm"), button:has-text("Remote Desktop")').allTextContents();
+check('a Linux box leads with the shell clients, not RDP',
+  !/Remote Desktop/.test(order[0] ?? ''), JSON.stringify(order));
+
+// Remote Desktop hands over a file, because .rdp is not a URL scheme.
+const dl = p.waitForEvent('download', { timeout: 8000 }).catch(() => null);
+await accountRow.locator('button:has-text("Remote Desktop")').click();
+const download = await dl;
+check('Remote Desktop downloads an .rdp file',
+  !!download && download.suggestedFilename().endsWith('.rdp'),
+  download ? download.suggestedFilename() : 'no download fired');
+
+if (download) {
+  const stream = await download.createReadStream();
+  let rdp = '';
+  for await (const chunk of stream) rdp += chunk;
+  check('the .rdp names the host', rdp.includes(`mqhub-${stamp}.bank.local`), rdp.slice(0, 120));
+  check('the .rdp names the account', rdp.includes('username:s:svc_mq_dr'), rdp.slice(0, 160));
+  // Windows will not accept a plaintext password here anyway, and a file in
+  // Downloads is the last place one should be.
+  check('the .rdp carries no password', !rdp.includes(SECRET), rdp.slice(0, 200));
+}
+
+await p.waitForTimeout(900);
+const clip = await p.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+check('the password is on the clipboard, ready to paste', clip === SECRET,
+  clip ? `got ${clip.length} chars` : 'clipboard empty');
+
+body = await p.locator('body').textContent();
+check('and the page says so rather than leaving you guessing',
+  /password copied/i.test(body), body.slice(0, 200));
+check('the password itself is still not on screen', !body.includes(SECRET));
+
+// Opening a client is a credential access and has to be logged as one.
+const acctsNow = await api('GET', `/api/servers/${srv.id}/accounts`);
+const logNow = await api('GET', `/api/servers/accounts/${acctsNow[0].id}/access-log`);
+check('opening a client is written to the access log',
+  logNow.some(e => e.action === 'LAUNCH'), JSON.stringify(logNow.map(e => e.action)));
+check('the log records which client', logNow.some(e => /Remote Desktop/.test(e.detail || '')),
+  JSON.stringify(logNow.slice(0, 3)));
 
 section('Finding a server');
 

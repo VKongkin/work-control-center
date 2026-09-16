@@ -300,6 +300,9 @@ export interface Server {
   vendor_id?: number | null;
   owner_person_id?: number | null;
   paired_server_id?: number | null;
+  /** Null means the usual 22 / 3389, and connect links leave the port out. */
+  ssh_port?: number | null;
+  rdp_port?: number | null;
   notes?: string | null;
   active?: boolean | null;
 }
@@ -327,6 +330,26 @@ export interface SecretAccessEntry {
   action: 'SET' | 'REVEAL' | 'CLEAR' | 'DENIED';
   at: string;
   detail?: string | null;
+}
+
+export type ConnectMethod = 'rdp' | 'sftp' | 'ssh';
+
+/** Everything needed to open one account in a desktop client.
+ *  `secret` is present only when a password is stored and the vault is open;
+ *  it is deliberately absent from `launch`, which may be written to disk. */
+export interface ConnectPlan {
+  method: ConnectMethod;
+  label: string;
+  host: string;
+  port: number;
+  port_is_default: boolean;
+  username: string;
+  secret?: string | null;
+  secret_error?: string | null;
+  command: string;
+  launch:
+    | { kind: 'uri'; value: string }
+    | { kind: 'file'; filename: string; content: string; mime: string };
 }
 
 export interface VaultStatus {

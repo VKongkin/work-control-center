@@ -11,8 +11,10 @@ Three rules hold throughout this module:
   3. Nothing here is reachable from the agent interface. That is enforced in
      app/api/agent.py by not mounting these routes, not by a flag here.
 """
+import re
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -39,6 +41,8 @@ class ServerSchema(BaseModel):
     environment: str = "DC"
     os: Optional[str] = None
     role: Optional[str] = None
+    ssh_port: Optional[int] = None
+    rdp_port: Optional[int] = None
     system_id: Optional[int] = None
     department_id: Optional[int] = None
     vendor_id: Optional[int] = None
@@ -335,3 +339,132 @@ def access_log(account_id: int, db: Session = Depends(get_db), limit: int = Quer
         {"id": r.id, "action": r.action, "at": r.at, "detail": r.detail}
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------- connecting
+#
+# What is and is not possible here, because the limits drive the design:
+#
+#   * An .rdp file cannot carry a password. Windows stores it as a DPAPI blob
+#     encrypted to one user on one machine, so nothing generated on a server
+#     could ever decrypt there. Microsoft did that deliberately.
+#   * A password *can* go in an sftp:// URL, and it must not. A URL the browser
+#     navigates to is written to history, and a bank credential in browser
+#     history is exactly the thing the vault exists to avoid.
+#
+# So the password travels through the clipboard: one paste, and nothing written
+# to disk or history. The launch itself carries host, port and username, which
+# is the tedious part anyway.
+
+CONNECT_METHODS = {
+    "rdp":   {"label": "Remote Desktop", "default_port": 3389, "port_field": "rdp_port"},
+    "sftp":  {"label": "WinSCP",         "default_port": 22,   "port_field": "ssh_port"},
+    "ssh":   {"label": "MobaXterm",      "default_port": 22,   "port_field": "ssh_port"},
+}
+
+
+def _safe_filename(raw: str) -> str:
+    """A download name that survives Windows. Backslashes are the usual culprit,
+    since a domain account is written BANK\\svc_app and that is a path."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip("-")
+    return (cleaned or "connection")[:80]
+
+
+def _rdp_file(host: str, port: int, username: str) -> str:
+    """A minimal .rdp. Only the lines that change anything are included."""
+    address = host if port == 3389 else f"{host}:{port}"
+    return "\r\n".join([
+        f"full address:s:{address}",
+        f"username:s:{username}",
+        "prompt for credentials:i:1",
+        "screen mode id:i:2",
+        "authentication level:i:2",
+        "redirectclipboard:i:1",
+        "",
+    ])
+
+
+@router.post("/accounts/{account_id}/connect")
+def connect(account_id: int, method: str = Query(...), db: Session = Depends(get_db)):
+    """Everything a client needs to open this account, and the password to paste.
+
+    Audited exactly like a reveal, because that is what it is: the plaintext
+    leaves the building either way, and a log that recorded only the careful
+    route would be worse than no log at all.
+    """
+    method = (method or "").lower().strip()
+    spec = CONNECT_METHODS.get(method)
+    if not spec:
+        raise HTTPException(
+            status_code=422,
+            detail=f"method must be one of: {', '.join(CONNECT_METHODS)}",
+        )
+
+    account = _get_account(db, account_id)
+    server = db.query(Server).filter(Server.id == account.server_id).first()
+    if not server:
+        raise HTTPException(status_code=404, detail="That account's server is gone.")
+
+    host = (server.hostname or server.ip_address or "").strip()
+    if not host:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{server.name} has neither a hostname nor an IP address, so there "
+                   f"is nothing to connect to. Add one and try again.",
+        )
+
+    port = getattr(server, spec["port_field"], None) or spec["default_port"]
+    explicit = port != spec["default_port"]
+
+    secret = None
+    secret_error = None
+    if account.secret_ciphertext:
+        try:
+            secret = vault.decrypt(account.secret_ciphertext)
+        except vault.VaultLocked as e:
+            # Not fatal: the link is still worth having without the password.
+            secret_error = str(e)
+            _log(db, account_id, "DENIED", f"connect with {method}: {str(e)[:150]}")
+
+    if method == "rdp":
+        launch = {
+            "kind": "file",
+            "filename": _safe_filename(f"{server.name}-{account.username}") + ".rdp",
+            "content": _rdp_file(host, port, account.username),
+            "mime": "application/x-rdp",
+        }
+    else:
+        # No credentials in the URI. The username is fine - it is not the
+        # secret - but it has to be encoded: a domain account is written
+        # BANK\svc_app, and a raw backslash in the userinfo is not a legal URI.
+        user = quote(account.username, safe="")
+        authority = f"{user}@{host}" + (f":{port}" if explicit else "")
+        launch = {"kind": "uri", "value": f"{method}://{authority}/"}
+
+    if secret:
+        _log(db, account_id, "LAUNCH", f"opened with {spec['label']}")
+        db.commit()
+
+    return {
+        "method": method,
+        "label": spec["label"],
+        "host": host,
+        "port": port,
+        "port_is_default": not explicit,
+        "username": account.username,
+        "secret": secret,
+        "secret_error": secret_error,
+        "launch": launch,
+        # Shown in the UI and copyable, for anyone who would rather type it.
+        "command": _command(method, host, port, explicit, account.username),
+    }
+
+
+def _command(method: str, host: str, port: int, explicit: bool, user: str) -> str:
+    if method == "rdp":
+        return f"mstsc /v:{host}:{port}" if explicit else f"mstsc /v:{host}"
+    if method == "sftp":
+        tail = f":{port}" if explicit else ""
+        return f'winscp.exe "sftp://{user}@{host}{tail}/"'
+    tail = f" -p {port}" if explicit else ""
+    return f"ssh {user}@{host}{tail}"

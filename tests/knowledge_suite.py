@@ -243,6 +243,87 @@ check("but it does say whether one exists",
 s, one = call("GET", f"/api/servers/{sid}")
 check("the server record itself carries no credential", CANARY not in json.dumps(one))
 
+section("Servers: one click into a client")
+
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
+if vault_on:
+    check("rdp gives back a plan", s == 200 and plan.get("launch"), f"{s} {str(plan)[:120]}")
+    check("it is a downloadable file, since .rdp is not a URL scheme",
+          (plan.get("launch") or {}).get("kind") == "file", str(plan.get("launch"))[:120])
+    body = (plan.get("launch") or {}).get("content", "")
+    check("the file names the host", f"full address:s:{srv['hostname']}" in body, body[:120])
+    check("the file names the account", "username:s:wasadmin" in body, body[:120])
+    # Windows encrypts an .rdp password to one machine with DPAPI, so no
+    # server could ever produce one that works. Putting a plaintext in there
+    # would just leave a password lying in the Downloads folder.
+    check("the file carries no password", CANARY not in body and "password" not in body.lower(),
+          body[:160])
+    check("but the password comes back to be pasted", plan.get("secret") == CANARY)
+    check("a default port is left out of the file", ":3389" not in body, body[:120])
+
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=sftp")
+uri = ((plan or {}).get("launch") or {}).get("value", "")
+check("sftp gives back a URI", s == 200 and uri.startswith("sftp://"), f"{s} {uri[:80]}")
+# A navigated URL is written to browser history. A bank password must not be.
+check("the URI carries no password", CANARY not in uri, uri[:100])
+check("the URI carries the username", "wasadmin@" in uri, uri[:100])
+check("a default port is left out of the URI", ":22" not in uri, uri[:100])
+
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=ssh")
+uri = ((plan or {}).get("launch") or {}).get("value", "")
+check("ssh gives back a URI", s == 200 and uri.startswith("ssh://"), f"{s} {uri[:80]}")
+check("and a command for anyone who would rather type it",
+      (plan or {}).get("command", "").startswith("ssh wasadmin@"), str(plan.get("command"))[:80])
+
+s, r = call("POST", f"/api/servers/accounts/{acid}/connect?method=telnet")
+check("an unsupported client is refused clearly", s == 422 and "rdp" in str(r), f"{s} {r}")
+
+# Non-default ports: the whole reason the fields exist.
+call("PUT", f"/api/servers/{sid}", {"ssh_port": 2222, "rdp_port": 13389})
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=ssh")
+uri = ((plan or {}).get("launch") or {}).get("value", "")
+check("a non-default ssh port appears in the URI", uri.endswith(":2222/"), uri[:100])
+check("and in the command", "-p 2222" in (plan or {}).get("command", ""), str(plan.get("command")))
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
+body = ((plan or {}).get("launch") or {}).get("content", "")
+check("a non-default rdp port appears in the file", ":13389" in body, body[:120])
+call("PUT", f"/api/servers/{sid}", {"ssh_port": None, "rdp_port": None})
+
+# A domain account is written BANK\svc_x. A raw backslash is not legal in a URI
+# and is a path separator in a filename.
+s, dom = call("POST", f"/api/servers/{sid}/accounts",
+              {"username": "BANK\\svc_probe", "account_type": "AD"})
+if s == 200:
+    s, plan = call("POST", f"/api/servers/accounts/{dom['id']}/connect?method=sftp")
+    uri = ((plan or {}).get("launch") or {}).get("value", "")
+    check("a domain username is percent-encoded in the URI",
+          "%5C" in uri and "\\" not in uri, uri[:100])
+    s, plan = call("POST", f"/api/servers/accounts/{dom['id']}/connect?method=rdp")
+    fname = ((plan or {}).get("launch") or {}).get("filename", "")
+    check("and stripped out of the download filename",
+          "\\" not in fname and fname.endswith(".rdp"), fname)
+    call("DELETE", f"/api/servers/accounts/{dom['id']}")
+
+s, log = call("GET", f"/api/servers/accounts/{acid}/access-log")
+if vault_on:
+    check("opening a client is logged like any other credential access",
+          "LAUNCH" in [r["action"] for r in (log or [])],
+          str([r["action"] for r in (log or [])][:6]))
+    check("the log says which client it was",
+          any("Remote Desktop" in (r.get("detail") or "") for r in (log or [])),
+          str([r.get("detail") for r in (log or [])][:4]))
+check("the log still never contains the password", CANARY not in json.dumps(log))
+
+# A box with no address cannot be connected to, and should say so rather than
+# producing a link to nowhere.
+s, bare = call("POST", "/api/servers", {"name": f"KB addressless {RUN}", "environment": "DEV"})
+if s == 200:
+    made_servers.append(bare["id"])
+    s, ba = call("POST", f"/api/servers/{bare['id']}/accounts", {"username": "nobody"})
+    s, r = call("POST", f"/api/servers/accounts/{ba['id']}/connect?method=ssh")
+    check("a server with no hostname or IP explains itself",
+          s == 422 and "hostname" in str(r).lower(), f"{s} {str(r)[:120]}")
+
 section("Servers: reading it back, on the record")
 
 s, rev = call("POST", f"/api/servers/accounts/{acid}/reveal?reason=suite%20check")

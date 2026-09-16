@@ -537,6 +537,54 @@ the point of holding it somewhere the database is not.
 | Copilot Studio says it cannot reach the server | The network problem above. It is not a configuration error and no amount of retrying fixes it |
 | `409` when storing a password | `WCC_VAULT_KEY` is unset or has changed. The inventory still works; only storing and revealing are affected |
 
+## Opening a server in one click
+
+Each account on the Servers page carries three buttons — **Remote Desktop**,
+**WinSCP** and **MobaXterm** — ordered so a Windows box leads with RDP and
+everything else leads with a shell. Clicking one copies the stored password to
+the clipboard and hands the client the host, port and username.
+
+**The password is copied, not embedded, and that is deliberate.** Two hard
+limits shaped this:
+
+- An `.rdp` file cannot carry a password. Windows stores it as a DPAPI blob
+  encrypted to one user on one machine, so nothing generated elsewhere could
+  ever decrypt there. Microsoft did that on purpose.
+- A password *can* go in an `sftp://` URL, and it must not. The browser writes
+  every URL it navigates to into history, and a bank credential in browser
+  history is precisely what the vault exists to prevent.
+
+So one paste is the honest cost. Everything else — hostname, port, username — is
+filled in for you, and that is the part you would otherwise be hunting for.
+Opening a client is recorded in the access log exactly like a reveal, because
+the plaintext leaves either way.
+
+### Ports
+
+Leave the port fields on a server blank unless they are unusual. Blank means 22
+and 3389, and the links then omit the port entirely, which is what every client
+expects. Set `ssh_port` or `rdp_port` only for the boxes that differ, and the
+port appears in the link, the `.rdp` file and the copyable command.
+
+### Making the buttons work the first time
+
+Remote Desktop needs nothing — it downloads a `.rdp` file that Windows opens.
+
+`sftp://` and `ssh://` are protocol handlers, and the browser can only hand them
+to an application that has registered for them:
+
+- **WinSCP** registers `sftp://` and `scp://` during installation. If it does
+  not fire, open WinSCP → *Options* → *Preferences* → *Integration* →
+  *Applications* and register it there.
+- **MobaXterm** does not register `ssh://` by default. Settings →
+  *Configuration* → *Terminal* has the option, or use PuTTY, which does.
+- The first click shows a browser prompt asking to open the external
+  application. Tick "always allow" and it stops asking.
+
+If a handler is not registered the click does nothing at all — the page stays
+where it is. That is the browser declining, not WCC failing. Use the copyable
+command shown in the toast in the meantime.
+
 ## Before you put real credentials in this
 
 Say this part plainly: banks normally require privileged credentials to live in a

@@ -2,7 +2,7 @@ import axios from 'axios';
 import type {
   Task, FollowUp, Project, Person, Department, Vendor, SystemRecord, Issue, Meeting,
   Category, Tool, CalendarConnection, KnowledgeArticle, ServerAccount,
-  SecretAccessEntry, VaultStatus, Server as ServerRecord,
+  SecretAccessEntry, VaultStatus, ConnectPlan, Server as ServerRecord,
 } from '../types';
 
 const client = axios.create({
@@ -109,6 +109,8 @@ export const serverApi = {
   deleteAccount: (id: number) => client.delete(`/servers/accounts/${id}`),
   setSecret: (id: number, secret: string | null) =>
     client.put<ServerAccount>(`/servers/accounts/${id}/secret`, { secret }),
+  connect: (id: number, method: 'rdp' | 'sftp' | 'ssh') =>
+    client.post<ConnectPlan>(`/servers/accounts/${id}/connect`, null, { params: { method } }),
   reveal: (id: number, reason?: string) =>
     client.post<{ username: string; secret: string }>(
       `/servers/accounts/${id}/reveal`, null, { params: { reason } }),
