@@ -439,6 +439,57 @@ hand-written rather than generated from the app's routes — a generated documen
 grows whatever you add to the application, and one day that would be a
 credential endpoint.
 
+## When the assistant tries once and then gives up
+
+The symptom: you ask it to create a task, the call fails, and it does nothing
+further — no retry, no explanation, no more tool calls for the rest of the
+session.
+
+That was a real defect, found by driving `/api/agent/mcp` the way a client does
+and sending the arguments a model actually produces. Three of them —
+`priority: "high"`, `priority: "HIGH"`, `status: "TODO"` — reached the database
+as invalid enum values, raised inside SQLAlchemy, and escaped as a bare **HTTP
+500 with a plain-text body**. A client expecting JSON-RPC cannot parse that, so
+it treats the server as broken rather than the argument as wrong, and stops.
+
+Three things changed:
+
+- **No tool failure can produce a 500 any more.** Everything comes back as an
+  `isError` result, which is what the MCP spec asks for and what lets a model
+  read the message and try again. Verified by sweeping every tool and every
+  field with nonsense values — 722 calls, all returning parsable JSON-RPC.
+- **The obvious synonyms are accepted.** "high" is `P1_HIGH`, "urgent" is
+  `P0_CRITICAL`, "todo" is `INBOX`, "done" is `COMPLETED`, and a trailing `Z` on
+  a date is fine. A model writes what a person writes; arguing with it costs a
+  round trip at best.
+- **When a value really is unusable, the error says what would work.** Not
+  `create_task() missing 1 required positional argument: 'title'`, which tells a
+  model nothing, but a sentence naming the field, the allowed values and the
+  instruction to call again.
+
+`status` also had no `enum` in its schema, which is precisely why models were
+inventing `TODO`. It has one now, as do `priority` on all three task tools.
+
+### Telling it how to work
+
+The server sends usage guidance in its MCP `instructions` on connect — search
+before answering, get ids from `list_tasks`, append rather than rewrite, resolve
+dates yourself, and that an `isError` reply means correct the argument rather
+than abandon the task.
+
+Not every client shows that text to the model. For VS Code, make it certain:
+copy [`copilot-instructions.md`](copilot-instructions.md) from this repository
+to `.github/copilot-instructions.md` in the workspace you actually work in.
+Copilot reads that file on every request, so it never has to rediscover how your
+tools behave.
+
+Two other things worth checking in VS Code if it still will not act:
+
+- The chat has to be in **Agent** mode. Ask and Edit modes cannot call tools.
+- Open the tool picker in the chat box and confirm the eight `work-control-center`
+  tools are ticked. VS Code caps how many tools can be active at once, and a
+  crowded workspace can leave yours switched off.
+
 ## The boundary
 
 The claim is that **Copilot cannot obtain a stored password from WCC**, and it is

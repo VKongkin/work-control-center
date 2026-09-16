@@ -427,6 +427,105 @@ check("an OpenAPI document is published for the plugin route",
 paths = list((spec or {}).get("paths", {}).keys())
 check("it describes the tools", any("search_knowledge" in p for p in paths), str(paths)[:200])
 
+section("Agent: a wrong argument must not kill the conversation")
+
+# What this replaces: priority "high" raised inside SQLAlchemy, escaped as a
+# bare HTTP 500 with a plain-text body, and the client - having received
+# something it could not parse as JSON-RPC - stopped for the rest of the
+# session. A tool that refuses an argument has to say so *in a result*.
+MODEL_ISH = [
+    ("a lowercase priority", {"title": "AG p1", "priority": "high"}),
+    ("a plain-English priority", {"title": "AG p2", "priority": "URGENT"}),
+    ("a status from another tracker", {"title": "AG s1", "status": "TODO"}),
+    ("a status in words", {"title": "AG s2", "status": "in progress"}),
+    ("a date with a Z on it", {"title": "AG d1", "due_date": "2026-09-30T14:00:00Z"}),
+    ("a date-only string", {"title": "AG d2", "due_date": "2026-09-30"}),
+    ("a relative date", {"title": "AG d3", "due_date": "next Friday"}),
+    ("a missing title", {"priority": "P1_HIGH"}),
+    ("a field that does not exist", {"title": "AG x1", "assignee": "me"}),
+    ("a value that is simply wrong", {"title": "AG x2", "priority": "banana"}),
+    ("a title longer than the column", {"title": "AG " + "x" * 600}),
+]
+made_tasks = []
+for label, args in MODEL_ISH:
+    st, resp = call("POST", "/api/agent/mcp",
+                    {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                     "params": {"name": "create_task", "arguments": args}},
+                    {"X-API-Key": AGENT_KEY})
+    parsed = isinstance(resp, dict) and ("result" in resp or "error" in resp)
+    check(f"{label} still returns a usable JSON-RPC reply",
+          st == 200 and parsed, f"HTTP {st} {str(resp)[:90]}")
+    rid = ((resp or {}).get("result") or {}).get("structuredContent", {})
+    if isinstance(rid, dict) and rid.get("id"):
+        made_tasks.append(rid["id"])
+
+# The friendly ones should succeed outright, not merely fail politely.
+def made(args):
+    s, r, out = tool("create_task", args)
+    if isinstance(out, dict) and out.get("id"):
+        made_tasks.append(out["id"])
+    return out
+
+out = made({"title": f"AG norm {RUN}", "priority": "high"})
+check("'high' is understood as P1_HIGH", (out or {}).get("priority") == "P1_HIGH", str(out)[:120])
+out = made({"title": f"AG norm2 {RUN}", "priority": "urgent", "status": "todo"})
+check("'urgent' becomes P0_CRITICAL", (out or {}).get("priority") == "P0_CRITICAL", str(out)[:120])
+check("'todo' becomes INBOX", (out or {}).get("status") == "INBOX", str(out)[:120])
+out = made({"title": f"AG norm3 {RUN}", "status": "in progress"})
+check("'in progress' becomes IN_PROGRESS", (out or {}).get("status") == "IN_PROGRESS", str(out)[:120])
+out = made({"title": f"AG norm4 {RUN}", "due_date": "2026-09-30T14:00:00Z"})
+check("a trailing Z on a date is tolerated", bool((out or {}).get("due_date")), str(out)[:120])
+
+# And the unfriendly ones have to teach the model how to retry.
+s, r, out = tool("create_task", {"title": "AG bad", "priority": "banana"})
+msg = str(((r or {}).get("result") or {}).get("content", [{}])[0].get("text", ""))
+check("an unusable value names the ones that would work",
+      "P1_HIGH" in msg and "banana" in msg, msg[:160])
+
+s, r, out = tool("create_task", {"due_date": "2026-09-30"})
+msg = str(((r or {}).get("result") or {}).get("content", [{}])[0].get("text", ""))
+check("a missing argument is explained without Python jargon",
+      "title" in msg and "positional" not in msg, msg[:160])
+
+s, r, out = tool("create_task", {"title": "AG rel", "due_date": "next Friday"})
+msg = str(((r or {}).get("result") or {}).get("content", [{}])[0].get("text", ""))
+check("a relative date is told what format to use",
+      "YYYY-MM-DD" in msg, msg[:160])
+
+# Whatever went wrong, the next call has to work. A poisoned session would look
+# exactly like the agent "giving up".
+s, r, out = tool("list_tasks", {"limit": 1})
+check("the connection still works after every one of those",
+      s == 200 and isinstance(out, dict) and "results" in out, str(out)[:120])
+
+section("Agent: what the client reads before it starts")
+
+s, r = agent("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+inst = ((r or {}).get("result") or {}).get("instructions", "")
+check("the server tells the client how to use it", len(inst) > 200, f"{len(inst)} chars")
+check("including that a failed call should be retried, not abandoned",
+      "isError" in inst and "again" in inst, inst[:160])
+check("and that ids come from list_tasks rather than imagination",
+      "list_tasks" in inst, inst[:160])
+
+s, r = agent("tools/list")
+listed = ((r or {}).get("result") or {}).get("tools", [])
+for t in listed:
+    props = t["inputSchema"].get("properties", {})
+    for field in ("status", "priority"):
+        if field in props and t["name"] in ("create_task", "update_task", "list_tasks"):
+            check(f"{t['name']}.{field} tells the model its allowed values",
+                  "enum" in props[field], str(props[field])[:80])
+
+# Clients probe for these whether or not they are advertised.
+for method, key in (("resources/list", "resources"), ("prompts/list", "prompts")):
+    s, r = agent(method)
+    check(f"{method} answers with an empty list rather than an error",
+          s == 200 and key in ((r or {}).get("result") or {}), str(r)[:110])
+
+for i in made_tasks:
+    call("DELETE", f"/api/tasks/{i}")
+
 section("Agent: the secrets are not in there, structurally")
 
 # The claim under test: the agent cannot hand a password to Copilot. Not

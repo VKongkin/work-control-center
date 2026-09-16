@@ -28,6 +28,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import KnowledgeArticle, Server, Task
 from app.models.knowledge import KINDS
+from app.models.knowledge import STATUSES as ARTICLE_STATUSES
+from app.models.servers import ENVIRONMENTS
+from app.models.tasks import TaskPriority, TaskStatus
 
 router = APIRouter()
 
@@ -72,6 +75,103 @@ def expose_accounts() -> bool:
     return os.getenv("WCC_AGENT_EXPOSE_ACCOUNTS", "0").strip().lower() in ("1", "true", "yes", "on")
 
 
+# ------------------------------------------------------- speaking model-ese
+#
+# A model writes what a person would write. Asked to raise an urgent task it
+# sends priority "high", not "P1_HIGH", and it invents "TODO" for a status
+# because that is what every other tracker calls it. Rejecting those is
+# technically correct and practically useless: the tool call fails, and a
+# failed tool call is where an agent stops.
+#
+# So: accept the obvious synonyms, and when a value really is unrecognisable,
+# say what the allowed ones are in the error itself, because that error text is
+# the only thing the model gets to read before trying again.
+
+TASK_PRIORITIES = tuple(p.value for p in TaskPriority)
+TASK_STATUSES = tuple(s.value for s in TaskStatus)
+
+PRIORITY_ALIASES = {
+    "critical": "P0_CRITICAL", "urgent": "P0_CRITICAL", "highest": "P0_CRITICAL",
+    "p0": "P0_CRITICAL", "blocker": "P0_CRITICAL",
+    "high": "P1_HIGH", "p1": "P1_HIGH", "important": "P1_HIGH",
+    "medium": "P2_MEDIUM", "normal": "P2_MEDIUM", "moderate": "P2_MEDIUM",
+    "p2": "P2_MEDIUM", "default": "P2_MEDIUM",
+    "low": "P3_LOW", "p3": "P3_LOW", "minor": "P3_LOW", "lowest": "P3_LOW",
+}
+
+TASK_STATUS_ALIASES = {
+    "todo": "INBOX", "to do": "INBOX", "new": "INBOX", "backlog": "INBOX",
+    "open": "PENDING", "not started": "PENDING", "planned": "PENDING",
+    "in progress": "IN_PROGRESS", "inprogress": "IN_PROGRESS", "doing": "IN_PROGRESS",
+    "started": "IN_PROGRESS", "active": "IN_PROGRESS", "wip": "IN_PROGRESS",
+    "blocked": "BLOCKED", "waiting": "BLOCKED", "on hold": "BLOCKED", "stuck": "BLOCKED",
+    "done": "COMPLETED", "complete": "COMPLETED", "completed": "COMPLETED",
+    "finished": "COMPLETED", "closed": "COMPLETED", "resolved": "COMPLETED",
+    "cancelled": "CANCELLED", "canceled": "CANCELLED", "abandoned": "CANCELLED",
+    "wont do": "CANCELLED", "won't do": "CANCELLED",
+}
+
+ARTICLE_KIND_ALIASES = {
+    "runbook": "RUNBOOK", "run book": "RUNBOOK", "procedure": "RUNBOOK",
+    "sop": "RUNBOOK", "playbook": "RUNBOOK",
+    "guide": "GUIDE", "install guide": "GUIDE", "installation": "GUIDE",
+    "how-to": "GUIDE", "howto": "GUIDE", "tutorial": "GUIDE",
+    "note": "NOTE", "notes": "NOTE", "memo": "NOTE",
+    "reference": "REFERENCE", "ref": "REFERENCE", "cheatsheet": "REFERENCE",
+    "cheat sheet": "REFERENCE",
+}
+
+ARTICLE_STATUS_ALIASES = {
+    "draft": "DRAFT", "wip": "DRAFT", "in progress": "DRAFT",
+    "published": "PUBLISHED", "public": "PUBLISHED", "live": "PUBLISHED",
+    "final": "PUBLISHED", "done": "PUBLISHED",
+    "archived": "ARCHIVED", "old": "ARCHIVED", "retired": "ARCHIVED",
+}
+
+
+def _parse_date(value: Optional[str]) -> Optional[datetime]:
+    """Accept the date formats a model reaches for, and name the good one if not.
+
+    A model will happily write "next Friday" - it cannot be talked out of it in
+    a schema description, so the error has to be the thing that teaches it.
+    """
+    if not value:
+        return None
+    raw = str(value).strip()
+    for form in (raw, raw.replace("Z", ""), raw.replace(" ", "T"), raw[:10]):
+        try:
+            return datetime.fromisoformat(form)
+        except (ValueError, TypeError):
+            continue
+    raise ValueError(
+        f"due_date was {raw!r}, which is not a date this understands. Use "
+        f"YYYY-MM-DD or YYYY-MM-DDTHH:MM - for example 2026-09-30 or "
+        f"2026-09-30T14:00. Work out the actual calendar date first; relative "
+        f"wording like 'next Friday' cannot be stored."
+    )
+
+
+def coerce(value: Optional[str], field: str, valid: tuple,
+           aliases: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """Map what the model wrote onto what the database accepts, or explain."""
+    if value is None or value == "":
+        return None
+    raw = str(value).strip()
+    squashed = raw.upper().replace(" ", "_").replace("-", "_")
+    if squashed in valid:
+        return squashed
+    key = raw.lower().replace("_", " ").strip()
+    if aliases:
+        if key in aliases:
+            return aliases[key]
+        if key.replace(" ", "") in aliases:
+            return aliases[key.replace(" ", "")]
+    raise ValueError(
+        f"{field} was {raw!r}, which is not one of: {', '.join(valid)}. "
+        f"Call the tool again with one of those."
+    )
+
+
 # ---------------------------------------------------------------- the tools
 #
 # Each returns plain data. They are shared by the REST routes and the MCP
@@ -93,9 +193,10 @@ def search_knowledge(db: Session, query: str = "", kind: Optional[str] = None,
                      environment: Optional[str] = None, limit: int = 20) -> Dict[str, Any]:
     q = db.query(KnowledgeArticle)
     if kind:
-        q = q.filter(KnowledgeArticle.kind == kind.upper())
+        q = q.filter(KnowledgeArticle.kind == coerce(kind, "kind", KINDS, ARTICLE_KIND_ALIASES))
     if environment:
-        q = q.filter(or_(KnowledgeArticle.environment == environment.upper(),
+        env = coerce(environment, "environment", ENVIRONMENTS + ("ALL",))
+        q = q.filter(or_(KnowledgeArticle.environment == env,
                          KnowledgeArticle.environment == "ALL"))
     if query:
         # Same word-by-word matching the page uses, so an agent asking for
@@ -121,12 +222,12 @@ def create_knowledge(db: Session, title: str, body: Optional[str] = None,
                      status: str = "DRAFT") -> Dict[str, Any]:
     if not (title or "").strip():
         raise ValueError("A title is required.")
-    kind = (kind or "NOTE").upper()
-    if kind not in KINDS:
-        raise ValueError(f"kind must be one of: {', '.join(KINDS)}")
+    kind = coerce(kind, "kind", KINDS, ARTICLE_KIND_ALIASES) or "NOTE"
+    status = coerce(status, "status", ARTICLE_STATUSES, ARTICLE_STATUS_ALIASES) or "DRAFT"
+    environment = coerce(environment, "environment", ENVIRONMENTS + ("ALL",))
     row = KnowledgeArticle(
         title=title.strip(), body=body, kind=kind, summary=summary, tags=tags,
-        environment=(environment or None) and environment.upper(), status=status.upper(),
+        environment=environment, status=status,
     )
     db.add(row)
     db.commit()
@@ -149,9 +250,9 @@ def update_knowledge(db: Session, id: int, title: Optional[str] = None,
     if tags is not None:
         row.tags = tags
     if kind is not None:
-        row.kind = kind.upper()
+        row.kind = coerce(kind, "kind", KINDS, ARTICLE_KIND_ALIASES)
     if status is not None:
-        row.status = status.upper()
+        row.status = coerce(status, "status", ARTICLE_STATUSES, ARTICLE_STATUS_ALIASES)
     if body is not None:
         row.body = body
     # Appending is offered separately because an agent asked to "add a step to
@@ -178,9 +279,9 @@ def list_tasks(db: Session, status: Optional[str] = None, priority: Optional[str
                overdue_only: bool = False, query: str = "", limit: int = 25) -> Dict[str, Any]:
     q = db.query(Task)
     if status:
-        q = q.filter(Task.status == status.upper())
+        q = q.filter(Task.status == coerce(status, "status", TASK_STATUSES, TASK_STATUS_ALIASES))
     if priority:
-        q = q.filter(Task.priority == priority.upper())
+        q = q.filter(Task.priority == coerce(priority, "priority", TASK_PRIORITIES, PRIORITY_ALIASES))
     if overdue_only:
         q = q.filter(Task.due_date < datetime.utcnow(),
                      ~Task.status.in_(["COMPLETED", "CANCELLED"]))
@@ -196,13 +297,10 @@ def create_task(db: Session, title: str, priority: str = "P2_MEDIUM",
                 status: str = "INBOX") -> Dict[str, Any]:
     if not (title or "").strip():
         raise ValueError("A title is required.")
-    due = None
-    if due_date:
-        try:
-            due = datetime.fromisoformat(due_date.replace("Z", ""))
-        except ValueError:
-            raise ValueError("due_date must look like 2026-09-30 or 2026-09-30T14:00")
-    row = Task(title=title.strip(), priority=priority.upper(), status=status.upper(),
+    priority = coerce(priority, "priority", TASK_PRIORITIES, PRIORITY_ALIASES) or "P2_MEDIUM"
+    status = coerce(status, "status", TASK_STATUSES, TASK_STATUS_ALIASES) or "INBOX"
+    due = _parse_date(due_date)
+    row = Task(title=title.strip(), priority=priority, status=status,
                due_date=due, description=description)
     db.add(row)
     db.commit()
@@ -217,13 +315,13 @@ def update_task(db: Session, id: int, status: Optional[str] = None,
     if not row:
         raise LookupError(f"No task with id {id}")
     if status:
-        row.status = status.upper()
+        row.status = coerce(status, "status", TASK_STATUSES, TASK_STATUS_ALIASES)
     if priority:
-        row.priority = priority.upper()
+        row.priority = coerce(priority, "priority", TASK_PRIORITIES, PRIORITY_ALIASES)
     if next_action is not None:
         row.next_action = next_action
     if due_date is not None:
-        row.due_date = datetime.fromisoformat(due_date.replace("Z", "")) if due_date else None
+        row.due_date = _parse_date(due_date)
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
@@ -235,7 +333,7 @@ def list_servers(db: Session, environment: Optional[str] = None,
     """Inventory only. No accounts unless explicitly switched on, never secrets."""
     q = db.query(Server).filter(Server.active.is_(True))
     if environment:
-        q = q.filter(Server.environment == environment.upper())
+        q = q.filter(Server.environment == coerce(environment, "environment", ENVIRONMENTS))
     for word in (query or "").split():
         like = f"%{word}%"
         q = q.filter(or_(Server.name.ilike(like), Server.hostname.ilike(like),
@@ -332,49 +430,75 @@ TOOLS: List[Dict[str, Any]] = [
     },
     {
         "name": "list_tasks",
-        "description": "List work items, optionally only the overdue ones.",
+        "description": (
+            "List the user's work items, newest due first. Use this to answer "
+            "'what am I working on', to find something that is late, and to get "
+            "a task's id before calling update_task."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "status": {"type": "string"},
-                "priority": {"type": "string"},
+                "status": {"type": "string", "enum": list(TASK_STATUSES)},
+                "priority": {"type": "string", "enum": list(TASK_PRIORITIES)},
                 "overdue_only": {"type": "boolean", "default": False},
-                "query": {"type": "string"},
+                "query": {"type": "string",
+                          "description": "Words to match in the title or description, "
+                                         "in any order."},
                 "limit": {"type": "integer", "default": 25},
             },
+            "additionalProperties": False,
         },
         "handler": list_tasks,
     },
     {
         "name": "create_task",
-        "description": "Add a work item.",
+        "description": (
+            "Add a work item to the user's task list. Use this whenever they ask "
+            "for something to be noted, tracked, remembered or raised as a task. "
+            "New items land in the INBOX to be triaged. Returns the created task "
+            "including its id."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "title": {"type": "string"},
-                "priority": {"type": "string",
-                             "enum": ["P0_CRITICAL", "P1_HIGH", "P2_MEDIUM", "P3_LOW"]},
-                "due_date": {"type": "string", "description": "2026-09-30 or 2026-09-30T14:00"},
-                "description": {"type": "string"},
-                "status": {"type": "string"},
+                "title": {"type": "string",
+                          "description": "What needs doing, in one line. Required."},
+                "priority": {"type": "string", "enum": list(TASK_PRIORITIES),
+                             "default": "P2_MEDIUM",
+                             "description": "Plain words like 'high' or 'urgent' are understood."},
+                "due_date": {"type": "string",
+                             "description": "YYYY-MM-DD or YYYY-MM-DDTHH:MM. Resolve "
+                                            "relative dates to a real date first; "
+                                            "'next Friday' is not accepted."},
+                "description": {"type": "string", "description": "Any detail worth keeping."},
+                "status": {"type": "string", "enum": list(TASK_STATUSES),
+                           "default": "INBOX"},
             },
             "required": ["title"],
+            "additionalProperties": False,
         },
         "handler": create_task,
     },
     {
         "name": "update_task",
-        "description": "Change a work item's status, priority, due date or next action.",
+        "description": (
+            "Change an existing work item's status, priority, due date or next "
+            "action. Get the id from list_tasks first - do not guess it."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "id": {"type": "integer"},
-                "status": {"type": "string"},
-                "priority": {"type": "string"},
-                "due_date": {"type": "string"},
-                "next_action": {"type": "string"},
+                "id": {"type": "integer",
+                       "description": "The task's id, as returned by list_tasks."},
+                "status": {"type": "string", "enum": list(TASK_STATUSES)},
+                "priority": {"type": "string", "enum": list(TASK_PRIORITIES)},
+                "due_date": {"type": "string",
+                             "description": "YYYY-MM-DD or YYYY-MM-DDTHH:MM."},
+                "next_action": {"type": "string",
+                                "description": "The single next physical step."},
             },
             "required": ["id"],
+            "additionalProperties": False,
         },
         "handler": update_task,
     },
@@ -405,6 +529,37 @@ def _run(db: Session, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     allowed = set(tool["inputSchema"].get("properties", {}))
     clean = {k: v for k, v in (args or {}).items() if k in allowed}
     return tool["handler"](db, **clean)
+
+
+def _explain(name: str, exc: Exception) -> str:
+    """Turn an exception into something a model can act on.
+
+    Two failures are worth rewriting by hand. A missing argument arrives as a
+    Python TypeError naming a "required positional argument", which tells a
+    model nothing about the tool it just called. And anything unforeseen would
+    otherwise reach the client as a stack-trace-shaped string or, worse, a bare
+    500 - so it gets a sentence that at least says which tool failed and what
+    the tool accepts.
+    """
+    if isinstance(exc, (ValueError, LookupError)):
+        return str(exc)
+
+    tool = BY_NAME.get(name)
+    fields = list((tool or {}).get("inputSchema", {}).get("properties", {}))
+    required = list((tool or {}).get("inputSchema", {}).get("required", []))
+
+    if isinstance(exc, TypeError) and "required positional argument" in str(exc):
+        missing = str(exc).split("argument:")[-1].strip().strip("'\"")
+        return (
+            f"{name} needs {missing}, and it was not supplied. "
+            f"Required: {', '.join(required) or 'none'}. "
+            f"Accepted: {', '.join(fields) or 'none'}."
+        )
+
+    return (
+        f"{name} could not complete: {type(exc).__name__}: {str(exc)[:300]}. "
+        f"It accepts: {', '.join(fields) or 'none'}."
+    )
 
 
 # ----------------------------------------------------------------- MCP over HTTP
@@ -458,14 +613,39 @@ async def _dispatch(message: Dict[str, Any], db: Session) -> Any:
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             "instructions": (
                 "Work Control Center holds this engineer's notes, runbooks, install "
-                "guides, work items and server inventory. Search before answering from "
-                "memory. Passwords are deliberately not available through this "
-                "interface; if asked for one, say where the credential is held instead."
+                "guides, work items and server inventory.\n\n"
+                "Use it rather than answering from memory:\n"
+                "- Anything to note, track, remember or raise becomes a task via "
+                "create_task. Only `title` is required. New tasks land in INBOX.\n"
+                "- Before update_task, call list_tasks to get the real id. Never "
+                "invent one.\n"
+                "- Before writing a new article, search_knowledge first - if one "
+                "already covers it, use update_knowledge with `append` rather than "
+                "creating a duplicate or rewriting the whole body.\n"
+                "- Resolve relative dates ('next Friday') to a real YYYY-MM-DD "
+                "before sending them. Dates are not parsed from words.\n"
+                "- Plain words for priority and status ('high', 'done') are "
+                "understood and normalised.\n\n"
+                "If a tool call comes back with isError, the message says what was "
+                "wrong and what the accepted values are. Read it and call the tool "
+                "again with corrections - do not abandon the task.\n\n"
+                "Passwords are deliberately not available through this interface. "
+                "If asked for one, say which vault holds it instead."
             ),
         })
 
     if method in ("notifications/initialized", "initialized"):
         return None  # a notification has no reply
+
+    # Not advertised in capabilities, but clients probe for them anyway. An
+    # empty list is a truthful answer and keeps their logs clean; an error here
+    # reads like a broken server.
+    if method == "resources/list":
+        return _result(request_id, {"resources": []})
+    if method == "resources/templates/list":
+        return _result(request_id, {"resourceTemplates": []})
+    if method == "prompts/list":
+        return _result(request_id, {"prompts": []})
 
     if method == "ping":
         return _result(request_id, {})
@@ -483,12 +663,16 @@ async def _dispatch(message: Dict[str, Any], db: Session) -> Any:
         name = params.get("name")
         try:
             data = _run(db, name, params.get("arguments") or {})
-        except LookupError as e:
+        except Exception as e:
+            # Every failure from a tool comes back as an isError *result*, never
+            # as a JSON-RPC error and never as a 500. This is the difference
+            # between an agent that reads the message and tries again, and one
+            # that receives an unparsable transport failure and stops dead.
+            db.rollback()
             return _result(request_id, {
-                "content": [{"type": "text", "text": str(e)}], "isError": True})
-        except (ValueError, TypeError) as e:
-            return _result(request_id, {
-                "content": [{"type": "text", "text": str(e)}], "isError": True})
+                "content": [{"type": "text", "text": _explain(name, e)}],
+                "isError": True,
+            })
         return _result(request_id, {
             "content": [{"type": "text", "text": json.dumps(data, default=str)}],
             "structuredContent": data,
@@ -506,9 +690,10 @@ def call_tool(name: str, body: Optional[Dict[str, Any]] = None, db: Session = De
     try:
         return _run(db, name, body or {})
     except LookupError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except (ValueError, TypeError) as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=404, detail=_explain(name, e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=_explain(name, e))
 
 
 @router.get("/openapi.json")
