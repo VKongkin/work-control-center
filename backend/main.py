@@ -24,11 +24,33 @@ from app.api import tasks, followups, projects, people, departments, vendors, sy
 from app.database import engine, Base, init_db
 from app.validation import register_error_handlers
 
+def _warn_if_passwords_are_reachable() -> None:
+    """Say out loud, once, that storing passwords here assumes a private port.
+
+    WCC has no login: every route under /api answers whoever can open a socket
+    to it, and that includes revealing a stored password. On one person's
+    laptop that is fine and is the design. On a shared host it is not, and the
+    person who moves it there is unlikely to be thinking about it - so the log
+    says so at the moment the combination first exists, rather than leaving it
+    to be discovered.
+    """
+    if not os.getenv("WCC_VAULT_KEY", "").strip():
+        return
+    logging.getLogger("wcc").warning(
+        "Password storage is ON (WCC_VAULT_KEY is set). This application has no "
+        "login, so anyone who can reach this port can read a stored password. "
+        "Keep the port private to this machine, or leave WCC_VAULT_KEY unset on "
+        "a shared host - the inventory and vault_location still work without it. "
+        "See DEPLOY.md, 'Who can reach it'."
+    )
+
+
 # Create tables on startup
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Create tables
     init_db()
+    _warn_if_passwords_are_reachable()
     # Keep connected calendars up to date without anyone pressing a button.
     from app.services import scheduler
     await scheduler.start()

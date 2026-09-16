@@ -180,6 +180,107 @@ key is fine on an internal network and thin on a public one.
 Either way, WCC needs to be somewhere other than your laptop before Copilot
 Studio can see it. That is the real work; the wizard below is ten minutes.
 
+### Finding your Server URL
+
+> **Being domain-joined does not make your machine reachable from Microsoft.**
+> Domain join is about *identity* — your laptop trusts the bank's AD and the
+> bank's AD trusts your laptop, so you sign in with your domain account and
+> Kerberos works. It says nothing about who can open a TCP connection to you.
+> `bank.local` is an internal DNS zone that resolves only on the bank's network.
+> Microsoft's cloud cannot resolve it and could not route to it if it could.
+
+Three different questions get three different URLs. Work out which one you are
+actually asking.
+
+**1. For a client on the same machine** (VS Code, Claude Desktop — [step 3](#3-connect-a-client-on-your-own-machine)):
+
+```
+http://localhost:8000/api/agent/mcp
+```
+
+That is the whole answer. Nothing to look up.
+
+**2. For a colleague on the bank network.** You need your machine's name or
+address. In PowerShell:
+
+```powershell
+hostname                                                   # short name
+[System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName # fully qualified
+(Get-CimInstance Win32_ComputerSystem).Domain              # the domain you joined
+Get-NetIPAddress -AddressFamily IPv4 |
+  Where-Object { $_.IPAddress -notlike '127.*' } |
+  Select-Object IPAddress, InterfaceAlias
+```
+
+`ipconfig /all` shows the same things: **Host Name**, **Primary Dns Suffix**,
+**IPv4 Address**. The URL is then:
+
+```
+http://<hostname>.<primary dns suffix>:8000/api/agent/mcp
+```
+
+Confirm it before trusting it, from a *different* machine on the network:
+
+```powershell
+nslookup <hostname>.<domain>                       # does DNS know the name?
+Test-NetConnection <hostname>.<domain> -Port 8000  # can it open the port?
+curl http://<hostname>.<domain>:8000/health        # does WCC answer?
+```
+
+If `Test-NetConnection` fails, it is almost always Windows Firewall. As
+administrator:
+
+```powershell
+New-NetFirewallRule -DisplayName "WCC API" -Direction Inbound `
+  -Protocol TCP -LocalPort 8000 -Action Allow
+```
+
+**Read [the warning below](#before-you-expose-any-port) before you open that
+port.** A laptop is also a poor host regardless: it sleeps, its DHCP address
+changes, and it leaves the building at six o'clock.
+
+**3. For Copilot Studio.** None of the above works, because none of it is
+reachable from Microsoft's cloud. You need one of:
+
+- a name in a **public** DNS zone (`wcc.sbibank.com.kh`, not `.local`) pointing
+  at something in the bank's DMZ, with HTTPS and a real certificate; or
+- the **on-premises data gateway**, in which case the URL you give the custom
+  connector is the internal one from (2) — the gateway makes the outbound
+  connection from inside, so nothing is published.
+
+Both of those are requests to your network team, not things you can configure
+yourself. Which is fine: the ask is small and specific. *"I need an internal
+Linux VM with a fixed IP and a DNS record, running Docker, and an on-premises
+data gateway registered to our Power Platform environment so Copilot Studio can
+reach it."*
+
+**Do not reach for a tunnel** (ngrok, dev tunnels, Cloudflare Tunnel) to skip
+this. On a bank network they are usually blocked, always a policy conversation,
+and in this case genuinely dangerous — see below.
+
+### Before you expose any port
+
+**WCC has no login.** Everything under `/api` — tasks, meetings, the server
+inventory, and `POST /api/servers/accounts/{id}/reveal` — answers anyone who can
+open a TCP connection to it. The `WCC_AGENT_KEY` protects only `/api/agent/*`.
+Port 3000 is not safer: nginx proxies `/api/` through to the same backend.
+
+That is a sound design for `localhost` on one person's machine, which is what it
+has been until now. It stops being sound the moment the port is reachable by
+anyone else. Concretely: if you put this on a shared server with passwords in the
+vault, any colleague who can reach port 8000 or 3000 can read them, and the
+access log will faithfully record that it happened without recording who.
+
+So:
+
+- **Keep it on localhost** while it is only you. [Step 3](#3-connect-a-client-on-your-own-machine)
+  needs nothing else.
+- **Before it goes on a server**, either leave `WCC_VAULT_KEY` unset there — the
+  inventory and `vault_location` still work, and no password is stored to leak —
+  or put authentication in front of it (a reverse proxy with SSO, or network
+  rules that admit only your workstation).
+- **Never publish it to the internet as it stands**, tunnel included.
+
 ### The Copilot Studio wizard
 
 Once the URL is reachable:

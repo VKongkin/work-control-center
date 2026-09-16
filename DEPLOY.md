@@ -163,6 +163,31 @@ Set `POSTGRES_PASSWORD` **before** the first start. Postgres only reads it when
 it initialises the volume; changing it later has no effect until you
 `docker compose down -v`, which erases the database.
 
+## Who can reach it
+
+**WCC has no login.** Everything under `/api` answers anyone who can open a TCP
+connection to it — including the server inventory and, if you have set
+`WCC_VAULT_KEY`, the endpoint that reveals a stored password. `WCC_AGENT_KEY`
+protects only `/api/agent/*`. Port 3000 is not safer than 8000: nginx proxies
+`/api/` through to the same backend.
+
+That is the right design for one person on `localhost`, which is the install
+this document describes. It stops being right the moment the ports are reachable
+by someone else.
+
+If you put WCC on a shared machine:
+
+- **Leave `WCC_VAULT_KEY` unset there.** The inventory, the accounts and the
+  `vault_location` field all still work — you keep the map without the safe, and
+  there is no stored password to lose.
+- Or put something in front of it: a reverse proxy with SSO, or firewall rules
+  that admit only your own workstation.
+- Either way, do not publish it to the internet as it stands — including through
+  a tunnel.
+
+`COPILOT.md` covers this again in the context of letting Copilot reach it, which
+is the usual reason someone moves WCC off their laptop in the first place.
+
 ## Environment variables worth knowing
 
 Everything has a working default; these only matter when you want to change
