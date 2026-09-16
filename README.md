@@ -9,7 +9,7 @@
 | Run it on a machine that does not have the source | [DEPLOY.md](DEPLOY.md) |
 | Run it from this source tree, so my edits take effect | `make dev` — or [Quick Start](#quick-start) below |
 | Get my Outlook meetings in | [CALENDAR.md](CALENDAR.md) |
-| Store server passwords, and connect Copilot | [COPILOT.md](COPILOT.md) |
+| Store server passwords, or connect an AI assistant (free options included) | [COPILOT.md](COPILOT.md) |
 | Check something still works after a change | [tests/README.md](tests/README.md) |
 | See every Make target | `make help` |
 
@@ -37,7 +37,7 @@ A professional personal work management application designed for users working i
 - 📅 **Calendar Sync**: Outlook and ICS calendars sync in automatically; meetings you create in WCC stay yours — see [`CALENDAR.md`](CALENDAR.md)
 - 📖 **Knowledge**: Runbooks, install guides and the things you worked out once, in markdown, searchable by any word in any order, with a "still works" stamp so a stale runbook says so
 - 🖥️ **Servers & credentials**: What runs where, which accounts exist, and where each credential of record lives — with optional encrypted password storage and an access log of every reveal
-- 🤖 **Copilot / MCP agent**: An optional agent interface so Microsoft Copilot can search your runbooks and raise tasks. Passwords are unreachable from it by construction — see [`COPILOT.md`](COPILOT.md)
+- 🤖 **AI assistant (MCP) interface**: An optional agent interface so an assistant can search your runbooks and raise tasks. It is a standard MCP server, so it works with free clients — including a model running entirely on your own machine — as well as Copilot. Passwords are unreachable from it by construction — see [`COPILOT.md`](COPILOT.md)
 
 ## Tech Stack
 
@@ -126,7 +126,7 @@ This will:
 - **Frontend**: http://localhost:3000
 - **API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
-- **Database Admin**: http://localhost:8080 (Adminer)
+- **Database Admin**: http://localhost:8080 (Adminer — this machine only)
 
 ## Usage
 

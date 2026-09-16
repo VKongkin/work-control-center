@@ -302,6 +302,18 @@ check("a wrong key is a 401", s == 401, f"got {s}")
 s, r = call("POST", "/api/agent/tools/search_knowledge", {"query": "x"})
 check("the REST shape is protected too", s == 401, f"got {s}")
 
+# Clients are split on which header they send. LM Studio's own mcp.json example
+# uses Authorization: Bearer, and its config is quoted verbatim in COPILOT.md,
+# so both have to keep working.
+s, r = call("POST", "/api/agent/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            {"Authorization": f"Bearer {AGENT_KEY}"})
+check("the key is accepted as a bearer token too",
+      s == 200 and "result" in (r or {}), f"{s} {str(r)[:120]}")
+
+s, r = call("POST", "/api/agent/mcp", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            {"Authorization": "Bearer not-the-key"})
+check("but only the right one", s == 401, f"got {s}")
+
 section("Agent: it speaks MCP")
 
 s, r = agent("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})

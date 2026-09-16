@@ -1,22 +1,87 @@
-# Connecting Copilot to Work Control Center
+# Connecting an AI assistant to Work Control Center
 
 WCC exposes an agent interface so an AI assistant can answer "what's the runbook
 for failing MQ over to DR", raise a task from a chat, or append what you just
 learned to a note — without you leaving the window you are already in.
 
+**It is not a Copilot feature.** What WCC speaks is the Model Context Protocol,
+which is an open standard, so *any* MCP client can use it. Copilot Studio is one
+option and it is the one that costs money. [Which assistant should I
+use?](#which-assistant-should-i-use) compares the free ones first.
+
 **Do these in order.** Steps 1–3 take ten minutes, happen entirely on your own
-machine, and need nobody's permission. Step 4 is where Copilot comes in, and
-which route you take depends on something you need to find out first.
+machine, and need nobody's permission or licence.
 
 | | |
 |---|---|
 | [1. Turn it on](#1-turn-it-on) | Two keys in `.env`, restart |
 | [2. Prove it works](#2-prove-it-works) | `make agent-check` |
-| [3. Connect a client on your own machine](#3-connect-a-client-on-your-own-machine) | VS Code or Claude Desktop, over localhost. Works today |
-| [4. Connect Microsoft Copilot](#4-connect-microsoft-copilot) | Copilot Studio, and the network problem |
+| [3. Connect a client on your own machine](#3-connect-a-client-on-your-own-machine) | LM Studio, VS Code or Claude Desktop, over localhost |
+| [4. Connect Microsoft Copilot](#4-connect-microsoft-copilot) | Only if you have a Copilot Studio licence |
 
-Before any of it: **Copilot never sees a password.** Not by configuration — by
-construction. [The boundary](#the-boundary) explains exactly what that means.
+Before any of it: **the assistant never sees a password.** Not by configuration
+— by construction. [The boundary](#the-boundary) explains exactly what that
+means.
+
+---
+
+## Which assistant should I use?
+
+| | Cost | Where your runbooks go | Verdict |
+|---|---|---|---|
+| **LM Studio + a local model** | Free, including at work | **Nowhere.** The model runs on your machine | **Start here.** Best answer for a bank |
+| VS Code + **GitHub Copilot Free** | Free, 50 chat requests/month | GitHub / Microsoft cloud | Fine for occasional lookups. The cap is monthly and low |
+| **Continue** or **Cline** in VS Code, pointed at a local model | Free, open source | Nowhere, with a local model | If you want it inside the editor without the cap |
+| VS Code + GitHub Copilot **Pro** | $10/month, personal | Microsoft cloud | If you already pay for it |
+| **Copilot Studio** | Licensed, per-message capacity packs | Microsoft cloud | Only worth it for a Teams rollout to colleagues |
+
+Two things to know before choosing:
+
+**The local option is not a downgrade here — it is the better answer.** Your
+runbooks describe the bank's middleware and your inventory names its servers.
+With a cloud assistant that content leaves the building on every query and lands
+in someone's prompt logs. With a model running on your laptop it never leaves,
+which removes the policy conversation entirely. That is a real advantage, not a
+consolation prize.
+
+**Do not trust older blog posts about Gemini CLI.** Google shut its free tier
+for individual developers on 18 June 2026. Plenty of "free MCP setup" articles
+still recommend it.
+
+### LM Studio, concretely
+
+Free for commercial and work use since July 2025 — no form, no licence request.
+It has been an MCP host since version 0.3.17.
+
+1. Install LM Studio and download a model. Pick one advertised as supporting
+   **tool use / function calling** — LM Studio can filter for it. Tool calling is
+   the whole mechanism here, and a model without it will simply ignore WCC.
+   Around 7–8B parameters is the usual floor for reliable tool use, and that
+   wants roughly 8 GB of free RAM.
+2. Right sidebar → **Program** → **Install** → **Edit `mcp.json`**:
+
+```json
+{
+  "mcpServers": {
+    "work-control-center": {
+      "url": "http://localhost:8000/api/agent/mcp",
+      "headers": {
+        "Authorization": "Bearer PASTE_YOUR_WCC_AGENT_KEY_HERE"
+      }
+    }
+  }
+}
+```
+
+3. Ask it something only WCC knows: *"search my runbooks for MQ failover"*.
+
+WCC accepts the key either as `Authorization: Bearer <key>` or as
+`X-API-Key: <key>`, so LM Studio's own header format works unchanged.
+
+The honest caveat: a small local model is a weaker reasoner than a frontier
+cloud model. For "find the runbook and show it to me", which is most of what
+this is for, that gap barely matters. For "read these five runbooks and work out
+why the failover failed", it will.
 
 ---
 
@@ -96,12 +161,21 @@ not a test note. An agent connected to an empty knowledge base looks broken.
 ## 3. Connect a client on your own machine
 
 **Do this first, whatever you eventually want.** It runs on your laptop over
-`localhost`, needs no gateway, no tunnel and no approval from anyone, and it
-proves the interface works before you spend an afternoon on tenant
-configuration. If the answer you want is "ask a question, get the runbook", this
-may be all you ever need.
+`localhost`, needs no gateway, no tunnel, no licence and no approval from
+anyone, and it proves the interface works before you spend an afternoon on
+tenant configuration. If the answer you want is "ask a question, get the
+runbook", this may be all you ever need.
+
+### LM Studio (free, and nothing leaves the machine)
+
+See [Which assistant should I use?](#lm-studio-concretely) above for the
+`mcp.json` and the model requirement. This is the recommended route.
 
 ### VS Code (GitHub Copilot, agent mode)
+
+Agent mode and MCP are included on the **Free** plan, capped at 50 chat requests
+a month — enough to try it and enough for occasional lookups, not enough for
+daily use. Pro is $10/month if you want the cap lifted.
 
 Create `.vscode/mcp.json` in whatever folder you work in:
 
@@ -135,10 +209,20 @@ list the eight WCC tools.
 `MCP: Add Server` in the Command Palette does the same thing through a wizard if
 you prefer.
 
+### Continue or Cline, pointed at a local model
+
+Both are free, open-source VS Code extensions with MCP support, and both can use
+a model served locally by LM Studio or Ollama — so there is no monthly cap and
+nothing leaves the machine. Use this if you want the assistant inside the editor
+but not the Copilot Free request limit.
+
 ### Claude Desktop, or any other MCP client
 
-Same endpoint, same header. The interface is a standard MCP server over
-streamable HTTP (protocol `2025-06-18`), so anything that speaks MCP can use it.
+Same endpoint, same key. The interface is a standard MCP server over streamable
+HTTP (protocol `2025-06-18`), so anything that speaks MCP can use it — Claude
+Desktop, Zed, Cherry Studio, Jan, and others. WCC accepts the key as either
+`X-API-Key: <key>` or `Authorization: Bearer <key>`, which covers both
+conventions clients use.
 
 ## 4. Connect Microsoft Copilot
 
@@ -154,9 +238,22 @@ one of them can be pointed at a custom MCP server by you:
 | **GitHub Copilot in VS Code** | Yes — that is [step 3](#3-connect-a-client-on-your-own-machine), already done |
 
 Open `https://copilotstudio.microsoft.com` and see whether it lets you in. If it
-does, continue. If it asks you to start a trial or shows no environment, you
-need a licence and a Power Platform environment from whoever administers it —
-that is the ask to send, and it is a smaller ask than it sounds.
+asks you to start a trial or shows no environment, you need a licence and a
+Power Platform environment from whoever administers it.
+
+**Copilot Studio is not free**, and a trial that expires is not a plan. It is
+licensed per capacity — messages are metered — on top of whatever Microsoft 365
+Copilot licensing your organisation has. Two consequences worth being clear
+about before you spend an afternoon here:
+
+- Everything in this section only pays off if **colleagues** are going to use
+  the agent from Teams. For your own use, [step 3](#3-connect-a-client-on-your-own-machine)
+  does the same job for nothing.
+- It is also the option that sends your runbooks and server inventory to
+  Microsoft's cloud, which the local option does not. Weigh that before
+  requesting budget for it, not after.
+
+If it does let you in and a rollout to the team is the actual goal, carry on.
 
 ### The network problem, which you have to solve first
 
@@ -404,7 +501,7 @@ team before it becomes the safe.
 
 ---
 
-Sources for the Microsoft side:
+Sources:
 
 - [Connect your agent to an existing MCP server (Copilot Studio)](https://learn.microsoft.com/en-us/microsoft-copilot-studio/mcp-add-existing-server-to-agent)
 - [Plugins for Microsoft 365 Copilot](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/overview-plugins)
@@ -412,3 +509,6 @@ Sources for the Microsoft side:
 - [Configure authentication for MCP and API plugins](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/plugin-authentication)
 - [Connect to custom on-premises APIs using the data gateway](https://www.microsoft.com/en-us/power-platform/blog/power-automate/on-premise-apis/)
 - [MCP servers in VS Code](https://code.visualstudio.com/docs/copilot/customization/mcp-servers)
+- [GitHub Copilot plans and pricing](https://github.com/features/copilot/plans) — agent mode and MCP on the Free plan, and its limits
+- [LM Studio as an MCP host](https://lmstudio.ai/docs/app/plugins/mcp)
+- [LM Studio is free for use at work](https://lmstudio.ai/blog/free-for-work)
