@@ -172,11 +172,63 @@ to outbound connections, so it will collide with you eventually. If a port
 refuses to bind while nothing appears to be listening, see the Hyper-V reserved
 ranges note in `INSTALLATION.md`.
 
-Set `POSTGRES_PASSWORD` **before** the first start. Postgres only reads it when
-it initialises the volume; changing it later has no effect until you
-`docker compose down -v`, which erases the database.
+### Changing the database password after the fact
+
+Set `POSTGRES_PASSWORD` **before** the first start if you can — the Postgres
+image only reads it while initialising an empty volume, so editing it later does
+nothing on its own.
+
+It does **not** follow that you have to erase the database to change it. Change
+it inside Postgres, then make `.env` agree:
+
+```bash
+docker compose exec db psql -U wcc_user -d wcc_db \
+  -c "ALTER USER wcc_user WITH PASSWORD 'the-new-one';"
+```
+
+```env
+POSTGRES_PASSWORD=the-new-one
+```
+
+```bash
+docker compose up -d      # the backend picks up the new DATABASE_URL
+```
+
+Check it took, from a machine that is not this one, or after
+`docker compose down && docker compose up -d`:
+
+```bash
+docker compose exec db psql "postgresql://wcc_user:the-old-one@localhost/wcc_db" -c "select 1"
+# should fail
+```
+
+> Worth confirming yourself rather than taking on trust: this is standard
+> PostgreSQL behaviour and the image's own documented init rule, but it was not
+> exercised against a real container while this was written.
 
 ## Who can reach it
+
+Four ports, and they are deliberately not all the same.
+
+| Port | Bound to | Reachable from |
+|---|---|---|
+| 3000 frontend | `0.0.0.0` | anywhere on the network |
+| 8000 API | `0.0.0.0` | anywhere on the network |
+| 8080 Adminer | `127.0.0.1` | **this machine only** |
+| 5432 Postgres | `127.0.0.1` | **this machine only** |
+
+Adminer is a full database console with no password of its own, and Postgres
+holds everything the app knows behind a password that is `wcc_password` until
+you change it. Neither has any business answering the network, so neither does.
+`http://localhost:8080` still works; `http://thismachine.bank.local:8080` no
+longer does, which is the point.
+
+If you genuinely need one of them remotely — a DBA tool, say — `DB_BIND=0.0.0.0`
+and `ADMINER_BIND=0.0.0.0` restore the old behaviour. Change
+`POSTGRES_PASSWORD` first.
+
+Going the other way, `BIND_HOST=127.0.0.1` makes the app itself local-only too,
+which is the right setting on a laptop that is not serving anybody.
 
 **WCC has no login.** Everything under `/api` answers anyone who can open a TCP
 connection to it — including the server inventory and, if you have set

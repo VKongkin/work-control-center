@@ -81,7 +81,10 @@ Look for "healthy" status on all services.
 **API Health**: http://localhost:8000/health
 - Returns `{"status": "healthy"}`
 
-**Database Admin** (Adminer): http://localhost:8080
+**Database Admin** (Adminer): http://localhost:8080 — **localhost only**, by
+design. It is a full database console with no password of its own, so it is not
+published to the network. `ADMINER_BIND=0.0.0.0` overrides that if you have a
+reason.
 - Server: db
 - Username: wcc_user  
 - Password: wcc_password

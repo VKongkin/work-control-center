@@ -18,7 +18,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wcc_password}
       POSTGRES_DB: ${POSTGRES_DB:-wcc_db}
     ports:
-      - "${DB_PORT:-5432}:5432"
+      # Bound to the loopback address, not 0.0.0.0. Postgres holds everything
+      # this app knows and its password is a well-known default, so it has no
+      # business answering the network. Set DB_BIND=0.0.0.0 if you genuinely
+      # need to reach it from another machine - and change POSTGRES_PASSWORD
+      # first if you do.
+      - "${DB_BIND:-127.0.0.1}:${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -51,7 +56,11 @@ services:
       WCC_SYNC_TICK_SECONDS: ${WCC_SYNC_TICK_SECONDS:-60}
       WCC_TIMEZONE: ${WCC_TIMEZONE:-}
     ports:
-      - "${API_PORT:-8000}:8000"
+      # This one stays on all interfaces by default: reaching the API from
+      # another machine is the point of the agent interface. Note that the app
+      # has no login - see "Who can reach it" in DEPLOY.md before relying on
+      # that. BIND_HOST=127.0.0.1 makes the whole app local-only.
+      - "${BIND_HOST:-0.0.0.0}:${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -69,7 +78,7 @@ services:
     container_name: wcc_frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${BIND_HOST:-0.0.0.0}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
@@ -87,7 +96,9 @@ services:
     container_name: wcc_adminer
     restart: unless-stopped
     ports:
-      - "${ADMINER_PORT:-8080}:8080"
+      # Loopback too. Adminer is a full database console with no password of
+      # its own; reachable from the network it is simply a way in.
+      - "${ADMINER_BIND:-127.0.0.1}:${ADMINER_PORT:-8080}:8080"
     depends_on:
       - db
     networks:
