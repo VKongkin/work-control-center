@@ -25,20 +25,40 @@ Edit `.env` if you want to customize:
 - Database credentials
 - API port
 - Frontend port
+- `WCC_VAULT_KEY` — needed only to store server passwords
+- `WCC_AGENT_KEY` — needed only to enable the Copilot/MCP interface
+
+The last two are generated, not chosen; `.env.example` has the commands, and
+[COPILOT.md](COPILOT.md) explains what each does. Leaving them unset is fine —
+the app runs without either.
 
 ### 3. Build and Start
 
-```bash
-docker compose up -d          # published images
-# or, to build from this source:
-# docker compose -f docker-compose.build.yml up -d --build
-```
+Two compose files, for two situations.
 
-Or use the Makefile:
+**Running published images** — nothing is built, works on any machine with
+Docker and no source:
 
 ```bash
-make up
+docker compose up -d
+# or: make up
 ```
+
+**Building from this source tree** — what you want while working on the code:
+
+```bash
+docker compose -f docker-compose.build.yml up -d --build
+# or: make dev
+```
+
+The build file compiles `./backend` and `./frontend` locally instead of pulling
+`vkongkin/work-control-center`, and mounts `./backend` into the container so
+Python edits apply on restart without rebuilding. Frontend changes need
+`--build`, because the frontend ships as a compiled bundle.
+
+Both files use the same named volume, so switching between them keeps your data.
+Rebuilding never touches the database — Postgres is a pulled image with no build
+step, so `--build` cannot rebuild it.
 
 Wait for all services to be healthy (about 60 seconds):
 
@@ -66,6 +86,15 @@ Look for "healthy" status on all services.
 - Username: wcc_user  
 - Password: wcc_password
 - Database: wcc_db
+
+**Agent interface** (only if you set `WCC_AGENT_KEY`):
+
+```bash
+make agent-check
+```
+
+Reports whether the interface is on, whether the key in `.env` is the one the
+running container has, and what to do about it if not.
 
 ## Verification Checklist
 

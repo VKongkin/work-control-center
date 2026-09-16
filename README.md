@@ -2,6 +2,17 @@
 
 > **Running this on another machine?** See [DEPLOY.md](DEPLOY.md) — `docker compose up -d` pulls the published images, no build required.
 
+### Which guide do I follow?
+
+| I want to… | Read |
+|---|---|
+| Run it on a machine that does not have the source | [DEPLOY.md](DEPLOY.md) |
+| Run it from this source tree, so my edits take effect | `make dev` — or [Quick Start](#quick-start) below |
+| Get my Outlook meetings in | [CALENDAR.md](CALENDAR.md) |
+| Store server passwords, and connect Copilot | [COPILOT.md](COPILOT.md) |
+| Check something still works after a change | [tests/README.md](tests/README.md) |
+| See every Make target | `make help` |
+
 A professional personal work management application designed for users working in complex enterprise environments who need to manage work across multiple departments, teams, vendors, and systems.
 
 ## Problem Solved
@@ -76,13 +87,32 @@ The default configuration uses:
 - API: localhost:8000
 - Frontend: localhost:3000
 
+Two optional keys are worth setting now rather than later — `WCC_VAULT_KEY` to
+store server passwords and `WCC_AGENT_KEY` to enable the Copilot/MCP interface.
+`.env.example` shows how to generate each; [COPILOT.md](COPILOT.md) explains
+what they do.
+
 ### 3. Start the Application
 
 ```bash
-docker compose up -d          # published images
-# or, to build from this source:
-# docker compose -f docker-compose.build.yml up -d --build
+docker compose up -d          # published images — nothing is built
 ```
+
+Or build both images from this source tree, which is what you want while
+working on the code:
+
+```bash
+make dev
+# same as: docker compose -f docker-compose.build.yml up -d --build
+```
+
+`docker-compose.build.yml` differs from the default in two ways: it builds the
+backend and frontend from `./backend` and `./frontend` instead of pulling
+`vkongkin/work-control-center`, and it mounts `./backend` into the container so
+Python edits take effect without a rebuild. Both files pin the same named volume
+(`work-control-center_postgres_data`), so you can switch between them without
+losing data. Frontend changes still need `--build`, since the frontend is served
+as a compiled bundle.
 
 This will:
 - Start PostgreSQL database

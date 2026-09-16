@@ -1,4 +1,4 @@
-.PHONY: help up dev down logs logs-backend logs-frontend logs-db restart clean reset status pull backup restore
+.PHONY: help up dev down logs logs-backend logs-frontend logs-db restart clean reset status pull backup restore agent-check
 
 DB_USER ?= wcc_user
 DB_NAME ?= wcc_db
@@ -29,6 +29,9 @@ help:
 	@echo "    make backup         Write wcc-backup.sql from the running database"
 	@echo "    make restore        Load wcc-backup.sql into the running database"
 	@echo "    make reset          Delete all data and start fresh (asks first)"
+	@echo ""
+	@echo "  Agent (Copilot / MCP)"
+	@echo "    make agent-check    Check the agent interface is on and reachable"
 	@echo ""
 	@echo "  Shells"
 	@echo "    make shell-backend  Shell inside the backend container"
@@ -115,3 +118,37 @@ shell-frontend:
 
 shell-db:
 	docker compose exec db psql -U $(DB_USER) -d $(DB_NAME)
+
+# Is the Copilot/MCP interface actually on? Reads the key out of .env so the
+# answer does not depend on remembering it. See COPILOT.md.
+agent-check:
+	@port=$$(grep -E '^API_PORT=' .env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]'); \
+	 port=$${port:-8000}; \
+	 url="http://localhost:$$port"; \
+	 key=$$(grep -E '^WCC_AGENT_KEY=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]'); \
+	 echo ""; \
+	 echo "  API        $$url"; \
+	 if ! curl -fsS "$$url/health" >/dev/null 2>&1; then \
+	   echo "  Result     the API is not answering. Is it running? 'make status'"; echo ""; exit 1; fi; \
+	 status=$$(curl -fsS "$$url/api/agent/status"); \
+	 echo "  Status     $$status" | head -c 400; echo ""; \
+	 case "$$status" in *'"enabled": true'*|*'"enabled":true'*) ;; \
+	   *) echo ""; echo "  Result     switched off. Put WCC_AGENT_KEY in .env and 'docker compose up -d'."; \
+	      echo "             See COPILOT.md step 1."; echo ""; exit 1 ;; esac; \
+	 if [ -z "$$key" ]; then \
+	   echo ""; echo "  Result     enabled, but WCC_AGENT_KEY is not in .env so this cannot test a call."; echo ""; exit 1; fi; \
+	 reply=$$(curl -fsS -X POST "$$url/api/agent/mcp" -H 'Content-Type: application/json' \
+	   -H "X-API-Key: $$key" \
+	   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' 2>/dev/null); \
+	 case "$$reply" in *search_knowledge*) \
+	   echo ""; \
+	   echo "  Result     working. The key in .env is accepted and the tools are listed."; \
+	   echo ""; \
+	   echo "  MCP        $$url/api/agent/mcp      (header X-API-Key)"; \
+	   echo "  OpenAPI    $$url/api/agent/openapi.json"; \
+	   echo ""; \
+	   echo "  Next       COPILOT.md step 3 - point VS Code or Claude Desktop at it."; \
+	   echo "" ;; \
+	   *) echo ""; echo "  Result     enabled, but the key in .env was rejected."; \
+	      echo "             The running container may still have an older key - 'docker compose up -d'."; \
+	      echo ""; exit 1 ;; esac

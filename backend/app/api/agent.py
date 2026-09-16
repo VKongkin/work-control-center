@@ -21,7 +21,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -432,8 +432,18 @@ async def mcp(request: Request, db: Session = Depends(get_db)):
 
     # A batch is legal JSON-RPC; answer each part in turn.
     if isinstance(message, list):
-        return [await _dispatch(m, db) for m in message]
-    return await _dispatch(message, db)
+        replies = [r for r in [await _dispatch(m, db) for m in message] if r is not None]
+    else:
+        replies = await _dispatch(message, db)
+
+    # A notification - `notifications/initialized`, which every client sends
+    # immediately after the handshake - has no reply at all. Streamable HTTP
+    # says answer it with 202 and an empty body; returning `null` with a 200
+    # looks like a malformed response to a strict client and can fail the
+    # connection before the first tool call.
+    if replies is None or replies == []:
+        return Response(status_code=202)
+    return replies
 
 
 async def _dispatch(message: Dict[str, Any], db: Session) -> Any:

@@ -312,6 +312,26 @@ check("it names itself", (res.get("serverInfo") or {}).get("name"), str(res))
 s, r = agent("ping")
 check("ping is answered", s == 200 and "result" in (r or {}), f"{s} {r}")
 
+# Every client sends this straight after the handshake and expects no reply.
+# Answering `null` with a 200 looks malformed to a strict client and can drop
+# the connection before the first tool call.
+req = urllib.request.Request(B + "/api/agent/mcp", method="POST")
+req.add_header("Content-Type", "application/json")
+req.add_header("X-API-Key", AGENT_KEY)
+with urllib.request.urlopen(
+        req, json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode(),
+        timeout=20) as resp:
+    code, payload = resp.status, resp.read()
+check("a notification gets 202 and an empty body, not a null",
+      code == 202 and payload == b"", f"{code} {payload[:40]!r}")
+
+s, r = call("POST", "/api/agent/mcp",
+            [{"jsonrpc": "2.0", "id": 7, "method": "ping"},
+             {"jsonrpc": "2.0", "method": "notifications/initialized"}],
+            {"X-API-Key": AGENT_KEY})
+check("a batch answers the requests and drops the notifications",
+      s == 200 and isinstance(r, list) and len(r) == 1 and r[0].get("id") == 7, f"{s} {r}")
+
 s, r = agent("tools/list")
 tools = [t["name"] for t in ((r or {}).get("result") or {}).get("tools", [])]
 check("tools are listed", s == 200 and len(tools) >= 8, f"{s} {tools}")
