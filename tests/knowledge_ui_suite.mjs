@@ -302,6 +302,89 @@ check('opening a client is written to the access log',
 check('the log records which client', logNow.some(e => /Remote Desktop/.test(e.detail || '')),
   JSON.stringify(logNow.slice(0, 3)));
 
+section('An estate you can actually read');
+
+// The complaint this answers: grouping by environment put every unrelated box
+// in one DC block and left MBS-APP-01 several screens from MBS-APP-01-DR.
+const svc = await api('POST', '/api/systems', { name: `UI Svc ${stamp}`, environment: 'DC' });
+const estate = [
+  [`UI EST-APP-01 ${stamp}`, 'DC', 'WebSphere ND', svc.id],
+  [`UI EST-APP-02 ${stamp}`, 'DC', 'WebSphere ND', svc.id],
+  [`UI EST-APP-01-DR ${stamp}`, 'DR', 'WebSphere ND (standby)', svc.id],
+  [`UI EST-UAT-01 ${stamp}`, 'UAT', 'WebSphere ND', svc.id],
+  // No system: has to fall back to the role, and the "(standby)" qualifier
+  // must not split the pair into two groups.
+  [`UI LONE-01 ${stamp}`, 'DC', `UI Lonely ${stamp}`, null],
+  [`UI LONE-01-DR ${stamp}`, 'DR', `UI Lonely ${stamp} (standby)`, null],
+];
+for (const [name, environment, role, system_id] of estate) {
+  const row = await api('POST', '/api/servers', {
+    name, environment, role, system_id,
+    hostname: `${name.split(' ')[1].toLowerCase()}.bank.local`,
+  });
+  cleanup.servers.push(row.id);
+}
+
+await go('/servers');
+const groupNames = async () =>
+  (await p.locator('section button[aria-expanded]').allTextContents()).map(t => t.trim());
+
+check('it groups by service out of the box',
+  (await groupNames()).includes(`UI Svc ${stamp}`), JSON.stringify(await groupNames()));
+
+const svcSection = p.locator('section', { hasText: `UI Svc ${stamp}` }).first();
+const head = await svcSection.locator('button[aria-expanded]').first().textContent();
+check('the header counts the nodes', /4 nodes/.test(await svcSection.textContent()), head);
+
+const chips = await svcSection.textContent();
+check('and says where they live without opening it',
+  /DC 2/.test(chips) && /DR 1/.test(chips) && /UAT 1/.test(chips), chips.slice(0, 200));
+
+// The whole point: the DR node sits with its DC siblings.
+const inGroup = await svcSection.locator('[data-row-id]').allTextContents();
+check('a service holds its DC and DR nodes together',
+  inGroup.some(t => t.includes('EST-APP-01 ')) && inGroup.some(t => t.includes('EST-APP-01-DR')),
+  JSON.stringify(inGroup.map(t => t.split('\n')[0].trim())));
+check('DC nodes come before DR, because that is the live one',
+  inGroup.findIndex(t => t.includes('-DR')) > 0,
+  JSON.stringify(inGroup.map(t => t.trim().slice(0, 20))));
+
+check('the environment moves onto the row as a badge',
+  (await svcSection.locator('[data-row-id]').first().textContent()).includes('DC'));
+
+// A role differing only by "(standby)" is the same service.
+const lonely = p.locator('section', { hasText: `UI Lonely ${stamp}` });
+check('a "(standby)" role does not split the pair into two groups',
+  (await lonely.count()) === 1, `${await lonely.count()} groups matched`);
+check('and the group says it was guessed from the role',
+  /grouped by what it runs/.test(await lonely.first().textContent()));
+
+section('Regrouping and collapsing');
+
+await p.locator('button:has-text("Environment")').first().click();
+await p.waitForTimeout(700);
+const envGroups = await groupNames();
+check('switching to Environment regroups the page',
+  envGroups.some(g => g.startsWith('DC')) && !envGroups.includes(`UI Svc ${stamp}`),
+  JSON.stringify(envGroups.slice(0, 6)));
+check('the choice is in the URL, so the view can be shared',
+  p.url().includes('group=environment'), p.url());
+
+await go(`/servers?group=role`);
+check('a shared URL restores the grouping',
+  (await p.locator('button[aria-pressed="true"]').first().textContent()).includes('What it runs'));
+
+await go('/servers');
+check('and the default comes back as Service',
+  (await p.locator('button[aria-pressed="true"]').first().textContent()).includes('Service'));
+
+const before = await p.locator('[data-row-id]').count();
+await p.locator('section', { hasText: `UI Svc ${stamp}` }).first()
+  .locator('button[aria-expanded]').first().click();
+await p.waitForTimeout(500);
+const afterCollapse = await p.locator('[data-row-id]:visible').count();
+check('collapsing a group hides its nodes', afterCollapse < before, `${before} -> ${afterCollapse}`);
+
 section('Finding a server');
 
 await p.locator('#server-search').fill(`mqhub-${stamp}`);

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle, ChevronRight, Copy, Eye, EyeOff, FolderSync, History, KeyRound,
   Monitor, Pencil, Plus, Search, Server as ServerIcon, Terminal, Trash2, X,
@@ -13,6 +14,9 @@ import {
 } from '../components/ui';
 import { ServerAccount, SecretAccessEntry, Server, VaultStatus, ConnectMethod } from '../types';
 import { copyText, downloadText } from '../lib/clipboard';
+import {
+  GroupBy, ServerGroup, envTone, groupServers,
+} from '../lib/serverGroups';
 import { fmtDate } from '../lib/constants';
 import { maxLength, required } from '../lib/validators';
 
@@ -36,8 +40,6 @@ const ACCOUNT_TYPES = [
   { value: 'APPLIANCE', label: 'Appliance' },
   { value: 'OTHER', label: 'Other' },
 ];
-
-const ORDER = ['DC', 'DR', 'UAT', 'SIT', 'DEV', 'OTHER'];
 
 const blankServer = {
   name: '', hostname: '', ip_address: '', environment: 'DC', os: '', role: '',
@@ -71,6 +73,16 @@ export default function ServersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [params, setParams] = useSearchParams();
+  const groupBy = ((params.get('group') as GroupBy) || 'service');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  function setGroupBy(next: GroupBy) {
+    const out: Record<string, string> = {};
+    if (next !== 'service') out.group = next;
+    setParams(out, { replace: true });
+    setCollapsed(new Set());
+  }
 
   const [serverOpen, setServerOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
@@ -214,9 +226,13 @@ export default function ServersPage() {
         .some((v) => (v ?? '').toLowerCase().includes(word)));
   });
 
-  const groups = ORDER
-    .map((env) => ({ env, items: visible.filter((s) => s.environment === env) }))
-    .filter((g) => g.items.length > 0);
+  // Recomputed only when something that affects it changes: with a few hundred
+  // servers this runs on every keystroke in the search box otherwise.
+  const groups = useMemo(
+    () => groupServers(visible, groupBy, (id) => lk.nameOf('systems', id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible.map((s) => s.id).join(','), groupBy, lk.systems]
+  );
 
   return (
     <div className="space-y-5">
@@ -255,6 +271,33 @@ export default function ServersPage() {
         )}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-500">Group by</span>
+        {([
+          ['service', 'Service'],
+          ['environment', 'Environment'],
+          ['role', 'What it runs'],
+        ] as [GroupBy, string][]).map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => setGroupBy(value)}
+            aria-pressed={groupBy === value}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition ${
+              groupBy === value
+                ? 'bg-blue-50 text-blue-800 ring-blue-200'
+                : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <span className="ml-auto text-xs text-slate-500">
+          {visible.length === servers.length
+            ? `${servers.length} servers in ${groups.length} groups`
+            : `${visible.length} of ${servers.length} servers`}
+        </span>
+      </div>
+
       {loading ? (
         <Spinner label="Loading servers…" />
       ) : (
@@ -272,16 +315,18 @@ export default function ServersPage() {
               )}
             />
           ) : groups.map((g) => (
-            <section key={g.env}>
-              <h2 className={`mb-2 flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-wider ${
-                g.env === 'DC' ? 'text-blue-700' : g.env === 'DR' ? 'text-violet-700' : 'text-slate-400'
-              }`}>
-                {g.env}
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium normal-case tracking-normal text-slate-600">
-                  {g.items.length}
-                </span>
-              </h2>
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <section key={g.key}>
+              <GroupHeader
+                group={g}
+                collapsed={collapsed.has(g.key)}
+                onToggle={() => setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(g.key)) next.delete(g.key); else next.add(g.key);
+                  return next;
+                })}
+              />
+              <div hidden={collapsed.has(g.key)}
+                className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <ul className="divide-y divide-slate-100">
                   {g.items.map((s) => (
                     <li key={s.id} data-row-id={s.id} className="group">
@@ -289,6 +334,8 @@ export default function ServersPage() {
                         server={s}
                         open={expanded.has(s.id)}
                         systemName={lk.nameOf('systems', s.system_id)}
+                        showSystem={groupBy !== 'service'}
+                        accountCount={accounts[s.id]?.length}
                         onToggle={() => toggle(s)}
                         onEdit={() => openEditServer(s)}
                         onDelete={() => setToDelete(s)}
@@ -453,23 +500,69 @@ function VaultNotice({ status }: { status: VaultStatus }) {
   );
 }
 
+function GroupHeader({
+  group, collapsed, onToggle,
+}: {
+  group: ServerGroup;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
+      <button
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? 'Show' : 'Hide'} ${group.label}`}
+        className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 hover:text-blue-700"
+      >
+        <ChevronRight size={15}
+          className={`text-slate-400 transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+        {group.label}
+      </button>
+
+      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+        {group.items.length} {group.items.length === 1 ? 'node' : 'nodes'}
+      </span>
+
+      {/* Where those nodes live, without having to open the group. */}
+      {group.envCounts.map(({ env, count }) => (
+        <span key={env}
+          className={`rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${envTone(env)}`}>
+          {env} {count}
+        </span>
+      ))}
+
+      {/* Says the grouping is a guess from the role, so it is obvious which
+          servers still need a system assigning in the Directory. */}
+      {group.derived && (
+        <span className="text-[11px] italic text-slate-400">grouped by what it runs</span>
+      )}
+    </div>
+  );
+}
+
 function ServerRow({
-  server, open, systemName, onToggle, onEdit, onDelete,
+  server, open, systemName, showSystem, accountCount, onToggle, onEdit, onDelete,
 }: {
   server: Server;
   open: boolean;
   systemName: string;
+  showSystem: boolean;
+  accountCount?: number;
   onToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  // The system is the group heading when grouping by service, so repeating it
+  // on every row is noise. The role is not repeated either when it *is* the
+  // heading - see `showSystem`.
   const meta = [
     server.hostname, server.ip_address, server.os, server.role,
-    systemName !== '—' ? systemName : null,
+    showSystem && systemName !== '—' ? systemName : null,
   ].filter(Boolean);
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-50/80">
+    <div className="flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-slate-50/80">
       <button
         onClick={onToggle}
         aria-expanded={open}
@@ -480,9 +573,21 @@ function ServerRow({
       </button>
       <ServerIcon size={16} className="mt-0.5 shrink-0 text-slate-400" />
       <div className="min-w-0 flex-1">
-        <button onClick={onToggle} className="text-left text-sm font-medium text-slate-900 hover:text-blue-700">
-          {server.name}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={onToggle} className="text-left text-sm font-medium text-slate-900 hover:text-blue-700">
+            {server.name}
+          </button>
+          {/* Now that the group is a service, the environment has to be on the
+              row - it is the difference between the live box and the standby. */}
+          <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${envTone(server.environment)}`}>
+            {server.environment}
+          </span>
+          {accountCount !== undefined && accountCount > 0 && (
+            <span className="text-[11px] text-slate-400">
+              {accountCount} {accountCount === 1 ? 'account' : 'accounts'}
+            </span>
+          )}
+        </div>
         {meta.length > 0 && (
           <p className="mt-0.5 truncate text-xs text-slate-500">{meta.join(' · ')}</p>
         )}
