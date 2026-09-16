@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type {
   Task, FollowUp, Project, Person, Department, Vendor, SystemRecord, Issue, Meeting,
-  Category, Tool, CalendarConnection,
+  Category, Tool, CalendarConnection, KnowledgeArticle, ServerAccount,
+  SecretAccessEntry, VaultStatus, Server as ServerRecord,
 } from '../types';
 
 const client = axios.create({
@@ -84,6 +85,39 @@ export const calendarApi = {
 export const meetingSync = {
   unlock: (id: number, field: string) =>
     client.post(`/meetings/${id}/unlock`, null, { params: { field } }),
+};
+
+export const knowledgeApi = {
+  ...crud<KnowledgeArticle>('/knowledge'),
+  tags: () => client.get<string[]>('/knowledge/meta/tags'),
+  markVerified: (id: number) => client.post(`/knowledge/${id}/verified`),
+};
+
+/**
+ * Servers and their accounts. Note what is missing: no call returns a password.
+ * `reveal` is the single deliberate path, and the server records every use.
+ */
+export const serverApi = {
+  ...crud<ServerRecord>('/servers'),
+  vaultStatus: () => client.get<VaultStatus>('/servers/vault-status'),
+  accounts: (serverId: number) =>
+    client.get<ServerAccount[]>(`/servers/${serverId}/accounts`),
+  addAccount: (serverId: number, data: Partial<ServerAccount>) =>
+    client.post<ServerAccount>(`/servers/${serverId}/accounts`, data),
+  updateAccount: (id: number, data: Partial<ServerAccount>) =>
+    client.put<ServerAccount>(`/servers/accounts/${id}`, data),
+  deleteAccount: (id: number) => client.delete(`/servers/accounts/${id}`),
+  setSecret: (id: number, secret: string | null) =>
+    client.put<ServerAccount>(`/servers/accounts/${id}/secret`, { secret }),
+  reveal: (id: number, reason?: string) =>
+    client.post<{ username: string; secret: string }>(
+      `/servers/accounts/${id}/reveal`, null, { params: { reason } }),
+  accessLog: (id: number) =>
+    client.get<SecretAccessEntry[]>(`/servers/accounts/${id}/access-log`),
+};
+
+export const agentApi = {
+  status: () => client.get('/agent/status'),
 };
 
 export const toolFiles = {

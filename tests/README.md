@@ -1,6 +1,6 @@
 # Test suites
 
-Seven suites, 720 checks, run against a live application.
+Nine suites, 872 checks, run against a live application.
 
 | File | Checks | What it covers |
 |---|---|---|
@@ -11,6 +11,8 @@ Seven suites, 720 checks, run against a live application.
 | `sync_suite.mjs` | 25 | Live data: a Directory record created, renamed, archived, restored or deleted must reach every form that references it without a page refresh |
 | `calendar_suite.py` | 96 | Calendar sync against a feed the suite serves itself: recurrence expansion, idempotence, the edit-protection rule, the delete guard, cancellation instead of deletion, disconnecting, timezone conversion (including changing a calendar's zone after the fact), and the automatic-sync schedule — due/not-due, the off switch, interval limits, and the failure backoff. The Microsoft path is checked as far as its own boundary — the Graph calls themselves are not exercised (see the note below) |
 | `calendar_ui_suite.mjs` | 61 | The same journey through the browser: connecting, testing, syncing, editing a synced meeting, releasing a field, disconnecting, a background sync appearing in an open page without a reload, the agenda's grouping, scope filter and search, and a browser running at UTC+7 to prove a 03:30Z meeting reads as 10:30 |
+| `knowledge_suite.py` | 101 | Knowledge articles, the server inventory, the credential vault and the agent interface — including the claims each module makes about itself: that no read endpoint returns a password, that every touch of one is logged, that the vault refuses to work without a key rather than falling back, that a changed key says so instead of returning nothing, and that the agent cannot reach a credential by any tool, any argument, or any import |
+| `knowledge_ui_suite.mjs` | 51 | The same two pages in a browser: writing a runbook and getting it back as rendered markdown, finding it by words in any order, saying it still works, and — on Servers — storing a password without it appearing on screen or in the page source, revealing it deliberately, and reading the access log that records both |
 
 ## Running them
 
@@ -24,6 +26,16 @@ docker compose up -d
 
 ```bash
 WCC_API=http://localhost:8000 python3 tests/api_suite.py
+WCC_API=http://localhost:8000 python3 tests/calendar_suite.py
+```
+
+The knowledge suite also needs the two keys the app reads from its environment.
+It adapts if `WCC_VAULT_KEY` is absent — checking that storing a password is
+refused rather than that it works — but it needs `WCC_AGENT_KEY` to match:
+
+```bash
+WCC_API=http://localhost:8000 WCC_AGENT_KEY=<the one the API has> \
+  python3 tests/knowledge_suite.py
 ```
 
 **Browser suites** — need Playwright once:
@@ -35,6 +47,8 @@ WCC_URL=http://localhost:3000 node tests/ui_suite.mjs
 WCC_URL=http://localhost:3000 node tests/followups_suite.mjs
 WCC_URL=http://localhost:3000 node tests/sync_suite.mjs
 WCC_URL=http://localhost:3000 node tests/features_suite.mjs
+WCC_URL=http://localhost:3000 node tests/calendar_ui_suite.mjs
+WCC_URL=http://localhost:3000 node tests/knowledge_ui_suite.mjs
 ```
 
 Each exits non-zero on failure, so they drop straight into CI.

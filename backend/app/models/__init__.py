@@ -13,6 +13,8 @@ from .activity import Activity
 from .attachments import Attachment
 from .tools import Tool
 from .calendar import CalendarConnection, AppSecret
+from .knowledge import KnowledgeArticle
+from .servers import Server, ServerAccount, SecretAccess
 
 __all__ = [
     "Task",
@@ -30,4 +32,8 @@ __all__ = [
     "Tool",
     "CalendarConnection",
     "AppSecret",
+    "KnowledgeArticle",
+    "Server",
+    "ServerAccount",
+    "SecretAccess",
 ]

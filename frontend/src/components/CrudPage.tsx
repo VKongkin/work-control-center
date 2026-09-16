@@ -74,6 +74,11 @@ interface Props<T> {
   headerExtra?: ReactNode;
   /** Rows appended to the detail view, for fields the form does not carry. */
   extraDetailRows?: (row: T, lk: Lookups) => DetailRow[];
+  /**
+   * Fields to leave out of the detail view. For anything `extraDetailRows`
+   * renders better itself - markdown, say - so it is not shown twice, once raw.
+   */
+  omitDetailFields?: string[];
   /** Small badges shown beside a row's title and at the top of its detail view. */
   rowBadges?: (row: T) => ReactNode;
   /** Fields to leave out of the form for this particular row. */
@@ -102,7 +107,7 @@ export interface ListRender<T> {
 export default function CrudPage<T extends { id: number }>({
   title, subtitle, singular, api, fields, columns = [], labelKey = 'name' as any, emptyHint,
   archivable, deleteNote, attachAs, blockDelete, headerExtra, extraDetailRows, rowBadges,
-  hideFields, renderList, listParams,
+  hideFields, renderList, listParams, omitDetailFields,
 }: Props<T>) {
   const [showArchived, setShowArchived] = useState(false);
   const extra = JSON.stringify(listParams ?? {});
@@ -136,6 +141,12 @@ export default function CrudPage<T extends { id: number }>({
   const [editing, setEditing] = useState<T | null>(null);
   const [viewing, setViewing] = useState<T | null>(null);
   const [toDelete, setToDelete] = useState<T | null>(null);
+
+  // What the detail view shows is the current version of the record, not the
+  // copy that was on screen when it opened. An action taken from inside the
+  // panel - marking a runbook verified, say - refreshes the list, and the panel
+  // has to follow, or the button appears to have done nothing.
+  const shown = viewing ? (items.find((r) => r.id === viewing.id) ?? viewing) : null;
 
   // Validation rules follow from each field's declared type, so a page only
   // spells out the unusual ones.
@@ -205,7 +216,9 @@ export default function CrudPage<T extends { id: number }>({
 
   /** The same field definitions that drive the form also describe the record. */
   function detailRows(row: T): DetailRow[] {
-    const rows: DetailRow[] = fields.map((f) => {
+    const rows: DetailRow[] = fields
+      .filter((f) => !(omitDetailFields ?? []).includes(f.key))
+      .map((f) => {
       const raw = (row as any)[f.key];
       let value: any = raw;
       if (f.type === 'lookup') value = lk.nameOf(f.lookup!, raw);
@@ -398,18 +411,18 @@ export default function CrudPage<T extends { id: number }>({
         </div>
       </Modal>
 
-      {viewing && (
+      {shown && (
         <DetailView
           open
           onClose={() => setViewing(null)}
-          title={String((viewing as any)[labelKey] ?? singular)}
-          rows={detailRows(viewing)}
-          badges={rowBadges?.(viewing)}
+          title={String((shown as any)[labelKey] ?? singular)}
+          rows={detailRows(shown)}
+          badges={rowBadges?.(shown)}
           entityType={attachAs && ATTACHABLE.has(attachAs) ? attachAs : undefined}
-          entityId={viewing.id}
-          onEdit={() => { const row = viewing; setViewing(null); openEdit(row); }}
-          onDelete={() => { const row = viewing; setViewing(null); setToDelete(row); }}
-          deleteBlockedReason={blockDelete?.(viewing) ?? null}
+          entityId={shown.id}
+          onEdit={() => { const row = shown; setViewing(null); openEdit(row); }}
+          onDelete={() => { const row = shown; setViewing(null); setToDelete(row); }}
+          deleteBlockedReason={blockDelete?.(shown) ?? null}
           deleteLabel={archivable ? 'Archive' : 'Delete'}
         />
       )}

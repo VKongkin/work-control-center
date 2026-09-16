@@ -18,6 +18,8 @@ import CategoriesPage from './pages/CategoriesPage';
 import ToolsPage from './pages/ToolsPage';
 import ToolRunPage from './pages/ToolRunPage';
 import CalendarSettingsPage from './pages/CalendarSettingsPage';
+import KnowledgePage from './pages/KnowledgePage';
+import ServersPage from './pages/ServersPage';
 import AlertsPage from './pages/AlertsPage';
 import SearchPage from './pages/SearchPage';
 
@@ -55,6 +57,8 @@ export default function App() {
                   <Route path="/vendors" element={<VendorsPage />} />
                   <Route path="/systems" element={<SystemsPage />} />
                   <Route path="/categories" element={<CategoriesPage />} />
+                  <Route path="/knowledge" element={<KnowledgePage />} />
+                  <Route path="/servers" element={<ServersPage />} />
                   <Route path="/tools" element={<ToolsPage />} />
                   <Route path="/tools/:id" element={<ToolRunPage />} />
                   <Route path="/calendars" element={<CalendarSettingsPage />} />

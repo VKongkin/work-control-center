@@ -70,3 +70,6 @@ logs/
 
 # Database backups
 wcc-backup*.sql
+
+# Screenshots and source bundles handed over during a working session
+Claude outputs/

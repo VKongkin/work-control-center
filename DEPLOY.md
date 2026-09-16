@@ -174,6 +174,26 @@ behaviour.
 | `WCC_SYNC_TICK_SECONDS` | `60` | How often the scheduler looks for calendars that are due. Rarely worth changing. |
 | `WCC_TIMEZONE` | unset | Fallback zone for a calendar with none of its own. See `CALENDAR.md`. |
 | `WCC_SECRET_KEY` | generated | Encrypts stored Microsoft sign-in tokens. Change it and you sign in again. |
+| `WCC_VAULT_KEY` | unset | Encrypts server passwords on the Servers page. Unset means the inventory works normally but storing a password is refused — there is deliberately **no** fallback key in the database. See below. |
+| `WCC_AGENT_KEY` | unset | Turns on the Copilot/MCP agent interface and is the key it requires. Unset means every agent route returns 401. See `COPILOT.md`. |
+| `WCC_AGENT_EXPOSE_ACCOUNTS` | `0` | Set to `1` to let the agent's `list_servers` include account usernames. Never includes a password at any setting. |
+
+### About `WCC_VAULT_KEY`
+
+Unlike `WCC_SECRET_KEY`, this one is never generated for you and never stored in
+the database. A key sitting beside the passwords it protects means one stolen
+backup gives up both, so the app would rather refuse to store a password than
+pretend to protect it.
+
+Generate one and keep it in your own password manager:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Lose it and the stored passwords cannot be read back — which is the point. Every
+account also records where its credential of record lives, so losing the key
+costs you convenience rather than the credential.
 
 ## Updating
 

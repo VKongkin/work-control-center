@@ -6,6 +6,7 @@ import { MUTATION_EVENT } from '../hooks/useResource';
 import {
   Home, Inbox, CheckSquare, Clock, BarChart3, AlertCircle, Users, Building,
   Package, Server, Bug, CalendarDays, Tag, Search, X, Wrench, Star, CalendarRange,
+  BookOpen, HardDrive,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -42,6 +43,8 @@ const GROUPS = [
   {
     label: 'Build',
     items: [
+      { icon: BookOpen, label: 'Knowledge', to: '/knowledge' },
+      { icon: HardDrive, label: 'Servers', to: '/servers' },
       { icon: Wrench, label: 'Tools', to: '/tools' },
     ],
   },

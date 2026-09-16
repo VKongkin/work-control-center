@@ -328,6 +328,13 @@ await page.waitForTimeout(1300);
 check('cleanup deleted', !(await page.locator('[data-list]').textContent()).includes(tName));
 
 section('Tasks lead with what is late');
+// The "Done" group only renders when there is finished work to fold away, which
+// is right - but it made this check depend on whatever happened to be in the
+// database. Provide the completed task rather than hoping for one.
+const doneProbe = await (await fetch(BASE + '/api/tasks', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ title: `Done probe ${Date.now()}`, status: 'COMPLETED', priority: 'P3_LOW' }),
+})).json();
 await go('/tasks');
 {
   const body = await page.locator('body').textContent();
@@ -348,6 +355,7 @@ await go('/tasks');
   check('each row still offers the inline status control',
     (await page.locator('[data-row-id] select').count()) > 0, '');
 }
+await fetch(BASE + `/api/tasks/${doneProbe.id}`, { method: 'DELETE' });
 
 section('Issues lead with the worst');
 await go('/issues');

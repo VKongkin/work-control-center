@@ -17,7 +17,7 @@ router = APIRouter()
 
 # What an entity_type is allowed to be. Anything else is a typo or an attempt
 # to squat on a name the UI does not know how to show.
-OWNERS = {"task", "followup", "issue", "meeting", "project", "tool"}
+OWNERS = {"task", "followup", "issue", "meeting", "project", "tool", "knowledge", "server"}
 
 # Browsers frequently send an empty or wrong content type for folder uploads,
 # so the extension decides how a file is served back.

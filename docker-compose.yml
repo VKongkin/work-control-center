@@ -39,6 +39,17 @@ services:
       API_PORT: 8000
       ENVIRONMENT: production
       SQL_ECHO: "False"
+      # Passed through from .env. Compose reads .env for substitution here, but
+      # does not hand it to the container on its own - a variable that is not
+      # named below never reaches the app, which is how a vault key set in .env
+      # can look ignored.
+      WCC_SECRET_KEY: ${WCC_SECRET_KEY:-}
+      WCC_VAULT_KEY: ${WCC_VAULT_KEY:-}
+      WCC_AGENT_KEY: ${WCC_AGENT_KEY:-}
+      WCC_AGENT_EXPOSE_ACCOUNTS: ${WCC_AGENT_EXPOSE_ACCOUNTS:-0}
+      WCC_AUTO_SYNC: ${WCC_AUTO_SYNC:-1}
+      WCC_SYNC_TICK_SECONDS: ${WCC_SYNC_TICK_SECONDS:-60}
+      WCC_TIMEZONE: ${WCC_TIMEZONE:-}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:

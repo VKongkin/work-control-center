@@ -264,3 +264,73 @@ export interface ToolManifest {
   total_bytes: number;
   files: { id: number; path: string; content_type: string; size: number }[];
 }
+
+
+export interface KnowledgeArticle {
+  id: number;
+  title: string;
+  kind: 'NOTE' | 'RUNBOOK' | 'GUIDE' | 'REFERENCE';
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+  summary?: string | null;
+  body?: string | null;
+  tags?: string | null;
+  system_id?: number | null;
+  project_id?: number | null;
+  department_id?: number | null;
+  vendor_id?: number | null;
+  category_id?: number | null;
+  server_id?: number | null;
+  environment?: string | null;
+  last_verified_at?: string | null;
+  pinned?: boolean | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Server {
+  id: number;
+  name: string;
+  hostname?: string | null;
+  ip_address?: string | null;
+  environment: string;
+  os?: string | null;
+  role?: string | null;
+  system_id?: number | null;
+  department_id?: number | null;
+  vendor_id?: number | null;
+  owner_person_id?: number | null;
+  paired_server_id?: number | null;
+  notes?: string | null;
+  active?: boolean | null;
+}
+
+export interface ServerAccount {
+  id: number;
+  server_id: number;
+  username: string;
+  account_type: string;
+  purpose?: string | null;
+  /** Where the authoritative credential lives, e.g. a vault safe. */
+  vault_location?: string | null;
+  last_rotated_at?: string | null;
+  rotation_days?: number | null;
+  notes?: string | null;
+  active?: boolean | null;
+  /** Whether a password is stored here at all. The password itself is never sent. */
+  has_secret?: boolean | null;
+  /** Whether revealing it would work right now, given the server's vault key. */
+  secret_readable?: boolean | null;
+}
+
+export interface SecretAccessEntry {
+  id: number;
+  action: 'SET' | 'REVEAL' | 'CLEAR' | 'DENIED';
+  at: string;
+  detail?: string | null;
+}
+
+export interface VaultStatus {
+  configured: boolean;
+  env_var: string;
+  detail: string;
+}

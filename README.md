@@ -23,6 +23,10 @@ A professional personal work management application designed for users working i
 - 📈 **Reviews**: Daily and weekly reviews to stay organized
 - 🔔 **Forgotten Items Detection**: Automatically identify neglected work items
 - 📋 **Activity History**: Complete audit trail of all changes
+- 📅 **Calendar Sync**: Outlook and ICS calendars sync in automatically; meetings you create in WCC stay yours — see [`CALENDAR.md`](CALENDAR.md)
+- 📖 **Knowledge**: Runbooks, install guides and the things you worked out once, in markdown, searchable by any word in any order, with a "still works" stamp so a stale runbook says so
+- 🖥️ **Servers & credentials**: What runs where, which accounts exist, and where each credential of record lives — with optional encrypted password storage and an access log of every reveal
+- 🤖 **Copilot / MCP agent**: An optional agent interface so Microsoft Copilot can search your runbooks and raise tasks. Passwords are unreachable from it by construction — see [`COPILOT.md`](COPILOT.md)
 
 ## Tech Stack
 
