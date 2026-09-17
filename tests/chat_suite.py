@@ -12,6 +12,7 @@ WCC_LLM_MODEL set to anything:
 """
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -291,6 +292,47 @@ try:
               "?api-version=2024-10-21", llm.endpoint())
         check("and a trailing slash in the base URL does not double up",
               "//chat/completions" not in llm.endpoint(), llm.endpoint())
+
+        # Each provider's own documentation gives a base URL and the path it
+        # serves. Getting that join wrong is a 404 with nothing to read, and it
+        # is the only part of a third-party integration testable from here -
+        # so the documented answer is written down rather than assumed.
+        os.environ.pop(llm.ENV_API_VERSION, None)
+        for name, base, expected in (
+            ("Docker Model Runner, from a container",
+             "http://model-runner.docker.internal/engines/v1",
+             "http://model-runner.docker.internal/engines/v1/chat/completions"),
+            ("Docker Model Runner, from the host",
+             "http://localhost:12434/engines/v1",
+             "http://localhost:12434/engines/v1/chat/completions"),
+            ("Groq",
+             "https://api.groq.com/openai/v1",
+             "https://api.groq.com/openai/v1/chat/completions"),
+            # Google publishes this one *with* a trailing slash, and pasting it
+            # verbatim is the obvious thing to do.
+            ("Gemini's OpenAI-compatible endpoint",
+             "https://generativelanguage.googleapis.com/v1beta/openai/",
+             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),
+            ("Ollama",
+             "http://host.docker.internal:11434/v1",
+             "http://host.docker.internal:11434/v1/chat/completions"),
+        ):
+            os.environ[llm.ENV_BASE] = base
+            check(f"{name} is called where its documentation says",
+                  llm.endpoint() == expected, llm.endpoint())
+
+        # The compose overlay hard-codes a URL. If someone edits it to something
+        # this code would mis-join, that is a broken assistant and a confusing
+        # afternoon - so the file and the code are checked against each other.
+        overlay = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "..", "docker-compose.model.yml")
+        text = open(overlay).read()
+        found = re.search(r"WCC_LLM_BASE_URL:\s*(\S+)", text)
+        check("the Docker-runs-the-model overlay sets a base URL", bool(found), text[:200])
+        if found:
+            os.environ[llm.ENV_BASE] = found.group(1)
+            check("and it is one this code turns into Docker's documented path",
+                  llm.endpoint().endswith("/engines/v1/chat/completions"), llm.endpoint())
     finally:
         for k, v in before.items():
             if v is None:

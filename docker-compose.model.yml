@@ -1,0 +1,46 @@
+# Let Docker run the assistant's model.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.model.yml up -d
+#
+# This exists because installing LM Studio is not always an option - a managed
+# laptop, a change request, a policy about unapproved software. Docker is
+# already installed here, since that is how WCC runs, and Docker Desktop can
+# serve a model itself through Model Runner. So this needs no new application,
+# no account, no API key, and nothing leaves the machine. For a bank's runbooks
+# that last point is the whole argument.
+#
+# Requires Docker Desktop 4.40+ (macOS) or 4.41+ (Windows) with
+# Settings -> AI -> "Enable Docker Model Runner" ticked. On Linux Docker Engine,
+# install the plugin (`sudo apt-get install docker-model-plugin`) and change the
+# URL below to http://172.17.0.1:12434/engines/v1, which is what a container
+# uses there.
+#
+# The first `up` downloads the model - several GB, once. It is then cached like
+# any image.
+#
+# Pick a different one with WCC_MODEL in .env. It must support tool calling, or
+# the assistant will chat pleasantly and never touch your data:
+#
+#   ai/qwen3          ~4.7GB   the default; good at tool calling
+#   ai/gemma4                  lighter, if RAM is tight
+#
+# `docker model ls` shows what is downloaded, `docker model rm` frees the space.
+
+services:
+  backend:
+    # Short syntax, so Compose pulls the model and starts it with the stack.
+    # It also injects ASSISTANT_URL and ASSISTANT_MODEL, which WCC ignores.
+    models:
+      - assistant
+    environment:
+      # Set explicitly rather than read from Compose's injected ASSISTANT_URL,
+      # because WCC appends /chat/completions itself and this file should say
+      # out loud which path it is aiming at. It is Docker's documented
+      # OpenAI-compatible base for a container on Docker Desktop, so the call
+      # lands on /engines/v1/chat/completions.
+      WCC_LLM_BASE_URL: http://model-runner.docker.internal/engines/v1
+      WCC_LLM_MODEL: ${WCC_MODEL:-ai/qwen3}
+
+models:
+  assistant:
+    model: ${WCC_MODEL:-ai/qwen3}

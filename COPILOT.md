@@ -22,7 +22,7 @@ machine, and need nobody's permission or licence.
 
 | | |
 |---|---|
-| [0. The Assistant page, inside WCC](#0-the-assistant-page-inside-wcc) | One variable. No client at all |
+| [0. The Assistant page, inside WCC](#0-the-assistant-page-inside-wcc) | One extra compose file. Nothing to install |
 | [1. Turn it on](#1-turn-it-on) | Two keys in `.env`, restart |
 | [2. Prove it works](#2-prove-it-works) | `make agent-check` |
 | [3. Connect a client on your own machine](#3-connect-a-client-on-your-own-machine) | LM Studio, VS Code or Claude Desktop, over localhost |
@@ -46,7 +46,38 @@ client to install, no `mcp.json`, no agent key pasted into a config, and nothing
 to start before you can ask a question. The tool-calling loop runs inside WCC's
 own backend, so the only thing WCC needs is somewhere to send the thinking.
 
-### Setting it up
+### Setting it up, with nothing to install
+
+If installing LM Studio is awkward — a managed laptop, a change request, a rule
+about unapproved software — you do not need it. Docker is already here, because
+that is how WCC runs, and Docker Desktop can serve the model itself:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.model.yml up -d
+```
+
+That is the whole setup. No account, no API key, no second application, and
+**nothing leaves the machine** — which is the part that matters when the thing
+being asked about is the bank's server inventory.
+
+Two conditions. Docker Desktop must be **4.40+ on macOS or 4.41+ on Windows**,
+with *Settings → AI → Enable Docker Model Runner* ticked. And the first `up`
+downloads the model, several GB, once — after that it is cached like any image.
+
+Change the model with `WCC_MODEL` in `.env`. It must support **tool calling**,
+or the assistant will chat pleasantly and never touch your data:
+
+```bash
+WCC_MODEL=ai/qwen3          # the default, ~4.7GB, good at tool calling
+```
+
+`docker model ls` shows what is downloaded and `docker model rm` frees the
+space. On Linux Docker Engine rather than Desktop, install the plugin
+(`sudo apt-get install docker-model-plugin`) and change the URL in
+`docker-compose.model.yml` to `http://172.17.0.1:12434/engines/v1`, which is
+what a container uses there.
+
+### Setting it up with LM Studio
 
 One variable, or two if the model is not on the same machine:
 
@@ -84,6 +115,48 @@ else in WCC is affected, so leaving it off is a perfectly good state.
 WCC_LLM_BASE_URL=http://host.docker.internal:11434/v1
 WCC_LLM_MODEL=qwen2.5:7b
 ```
+
+### A free hosted model, and the question to ask first
+
+Several providers give away an OpenAI-compatible endpoint, and WCC will talk to
+any of them — it is two variables, as always. Before reaching for one, though,
+read what the free tier does with what you send it, because "free" is often
+paid for in exactly the currency you cannot spend here.
+
+Google says it outright about the Gemini API's unpaid tier: content submitted
+is used "to provide, improve, and develop Google products and services", human
+reviewers may read it, and the terms instruct you plainly — **"Do not submit
+sensitive, confidential, or personal information to the Unpaid Services."**
+A runbook describing how the bank's middleware fails over, or an inventory
+naming its hosts, is all three. The paid tier does not train on your prompts;
+the free one is not built for this.
+
+That is not Google being unusual. It is the normal shape of a free AI tier, and
+it is worth checking for whichever provider you are considering rather than
+assuming. Two that are genuinely OpenAI-compatible and free to start:
+
+```bash
+# Groq
+WCC_LLM_BASE_URL=https://api.groq.com/openai/v1
+WCC_LLM_MODEL=<a model from their catalogue that supports tool use>
+WCC_LLM_API_KEY=<from console.groq.com>
+
+# Google Gemini - read the paragraph above before using this with real runbooks
+WCC_LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+WCC_LLM_MODEL=<a current Gemini model>
+WCC_LLM_API_KEY=<from aistudio.google.com>
+```
+
+Both need the container to reach the internet, which on a bank's network is its
+own conversation. `tests/chat_suite.py` pins the exact URL each provider's
+documentation gives, so a wrong join cannot silently become a 404 — but nobody
+here has run WCC against either account, so treat the model names as something
+to look up rather than copy.
+
+**The honest recommendation:** use the Docker route above. It costs nothing,
+installs nothing, needs no account, and asks nobody's permission — because the
+question "where did our runbooks go" never arises. Save a hosted model for when
+the company licences one properly, which is what the Azure section below is for.
 
 ### Azure OpenAI, when the company licence arrives
 
@@ -133,7 +206,9 @@ animating — so it waits, then shows you the whole turn including what it touch
 
 | | Cost | Where your runbooks go | Verdict |
 |---|---|---|---|
-| **WCC's own Assistant page + a local model** | Free, including at work | **Nowhere.** The model runs on your machine | **Start here.** Nothing to install, nothing to configure each morning |
+| **WCC's Assistant page + Docker serving the model** | Free, including at work | **Nowhere.** The model runs on your machine | **Start here.** Nothing to install at all — Docker is already here |
+| WCC's Assistant page + **LM Studio** | Free, including at work | **Nowhere** | Same, if you would rather have the model in its own app |
+| WCC's Assistant page + a **free hosted tier** | Free, with limits | The provider's cloud — and free tiers usually train on it | Fine for trying it out. Read [the question to ask first](#a-free-hosted-model-and-the-question-to-ask-first) before real runbooks |
 | **LM Studio + a local model** | Free, including at work | **Nowhere.** The model runs on your machine | Same privacy, and a chat window outside WCC. Needs `mcp.json` |
 | VS Code + **GitHub Copilot Free** | Free, 50 chat requests/month | GitHub / Microsoft cloud | Fine for occasional lookups. The cap is monthly and low |
 | **Continue** or **Cline** in VS Code, pointed at a local model | Free, open source | Nowhere, with a local model | If you want it inside the editor without the cap |
