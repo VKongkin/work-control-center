@@ -2,7 +2,7 @@ import axios from 'axios';
 import type {
   Task, FollowUp, Project, Person, Department, Vendor, SystemRecord, Issue, Meeting,
   Category, Tool, CalendarConnection, KnowledgeArticle, ServerAccount,
-  SecretAccessEntry, VaultStatus, ConnectPlan, Server as ServerRecord,
+  SecretAccessEntry, VaultStatus, ConnectPlan, DocxImportResult, Server as ServerRecord,
 } from '../types';
 
 const client = axios.create({
@@ -91,6 +91,20 @@ export const knowledgeApi = {
   ...crud<KnowledgeArticle>('/knowledge'),
   tags: () => client.get<string[]>('/knowledge/meta/tags'),
   markVerified: (id: number) => client.post(`/knowledge/${id}/verified`),
+  /**
+   * Convert a Word document into an article. Without an id a new article is
+   * created and titled from the document's own first heading; with one, the
+   * converted text is appended to that article. Either way the server owns the
+   * result, so the caller takes the body it sends back rather than merging.
+   */
+  importDocx: (file: File, articleId?: number) => {
+    const body = new FormData();
+    body.append('file', file);
+    if (articleId) body.append('article_id', String(articleId));
+    return client.post<DocxImportResult>('/knowledge/import/docx', body, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 /**

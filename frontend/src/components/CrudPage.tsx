@@ -13,7 +13,7 @@ import { Rule, email, maxLength, phone, required, saneDate } from '../lib/valida
 
 // Records the upload endpoint recognises. Directory entries are references,
 // not work items, so they carry no files.
-const ATTACHABLE = new Set(['task', 'followup', 'issue', 'meeting', 'project']);
+const ATTACHABLE = new Set(['task', 'followup', 'issue', 'meeting', 'project', 'knowledge']);
 
 type Lookups = ReturnType<typeof useLookups>;
 type LookupKey = 'people' | 'departments' | 'vendors' | 'systems' | 'projects' | 'categories';
@@ -34,6 +34,23 @@ export interface FieldDef {
   defaultValue?: string;
   /** extra checks beyond the ones implied by `type` and `required` */
   rules?: Rule[];
+  /**
+   * Draw this field some other way. Everything else about it - validation, the
+   * detail view, the dirty check - stays as it is. The markdown body of an
+   * article needs a toolbar and a paste handler; nothing else here does, and
+   * teaching the generic form about images would be the wrong trade.
+   */
+  render?: (ctx: FieldRender) => ReactNode;
+}
+
+/** What a custom field renderer is handed. */
+export interface FieldRender {
+  value: string;
+  onChange: (next: string) => void;
+  /** The record being edited, or null when it is being created. */
+  row: { id: number } | null;
+  error?: string;
+  className: string;
 }
 
 export interface ColumnDef<T> {
@@ -396,6 +413,15 @@ export default function CrudPage<T extends { id: number }>({
               className: f.full ? 'sm:col-span-2' : '',
             };
             const value = form.values[f.key] ?? '';
+            if (f.render)
+              return (
+                <div key={f.key} className={f.full ? 'sm:col-span-2' : ''}>
+                  {f.render({
+                    value, onChange: set, row: editing,
+                    error: form.errors[f.key], className: '',
+                  })}
+                </div>
+              );
             if (f.type === 'textarea')
               return <TextAreaField {...shared} value={value} onChange={set} placeholder={f.placeholder} />;
             if (f.type === 'lookup')

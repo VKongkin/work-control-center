@@ -86,6 +86,70 @@ def tool(name, args=None):
         return s, r, text
 
 
+def multipart(path, files, fields=None):
+    """POST a multipart form without pulling in `requests`."""
+    import uuid
+    boundary = uuid.uuid4().hex
+    body = b""
+    for k, v in (fields or {}).items():
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
+                 f'name="{k}"\r\n\r\n{v}\r\n').encode()
+    for k, (fn, data, ct) in files.items():
+        body += (f"--{boundary}\r\nContent-Disposition: form-data; "
+                 f'name="{k}"; filename="{fn}"\r\n'
+                 f"Content-Type: {ct}\r\n\r\n").encode() + data + b"\r\n"
+    body += f"--{boundary}--\r\n".encode()
+    req = urllib.request.Request(B + path, data=body, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status, json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode()
+        try:
+            return e.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return e.code, raw[:200]
+
+
+def build_docx() -> bytes:
+    """A Word document with everything a vendor guide actually contains."""
+    import io, struct, zlib
+    from docx import Document
+    from docx.shared import Inches
+
+    def png(w, h, rgb):
+        raw = b"".join(b"\x00" + bytes(rgb) * w for _ in range(h))
+        def chunk(t, d):
+            c = t + d
+            return struct.pack(">I", len(d)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+        return (b"\x89PNG\r\n\x1a\n"
+                + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+    d = Document()
+    d.add_heading(f"Vendor install guide {RUN}", level=1)
+    d.add_paragraph("Supplied by the vendor. Applies to the DC nodes.")
+    d.add_heading("Prerequisites", level=2)
+    for t in ["JDK 17 installed", "Ports 9080 and 9443 open"]:
+        d.add_paragraph(t, style="List Bullet")
+    d.add_heading("Steps", level=2)
+    for t in ["Unpack the archive", "Run the installer", "Apply the licence"]:
+        d.add_paragraph(t, style="List Number")
+    p = d.add_paragraph("Run ")
+    p.add_run("install.sh -silent").bold = True
+    p.add_run(" to begin.")
+    t = d.add_table(rows=3, cols=2)
+    t.style = "Table Grid"
+    for i, (a, b_) in enumerate([("Check", "Expected"), ("status", "RUNNING"), ("port", "9080")]):
+        t.rows[i].cells[0].text = a
+        t.rows[i].cells[1].text = b_
+    d.add_picture(io.BytesIO(png(30, 15, (10, 120, 200))), width=Inches(1.0))
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
 made_articles, made_servers = [], []
 
 
@@ -169,6 +233,146 @@ check("marking it verified stamps today", s == 200 and stamped == date.today().i
       f"{s} got {stamped!r}")
 
 
+section("Knowledge: images and files in the body")
+
+DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d494844520000000100000001080200000090"
+    "7753de0000000c4944415408d763f8cfc0000003010100189dd1b8000000"
+    "0049454e44ae426082"
+)
+
+s, att = multipart("/api/attachments",
+                   {"files": (f"screenshot-{RUN}.png", PNG, "image/png")},
+                   {"entity_type": "knowledge", "entity_id": str(aid)})
+check("an image can be attached to an article", s == 200 and att and att[0].get("id"),
+      f"{s} {str(att)[:120]}")
+img_id = att[0]["id"] if s == 200 and att else None
+
+if img_id:
+    # This is the URL the editor writes into the body when you paste.
+    req = urllib.request.Request(f"{B}/api/attachments/{img_id}/inline")
+    with urllib.request.urlopen(req, timeout=20) as r:
+        served, ctype = r.read(), r.headers.get("Content-Type")
+    check("and served back inline for the body to reference",
+          served == PNG and ctype == "image/png", f"{len(served)}B {ctype}")
+
+    call("PUT", f"/api/knowledge/{aid}",
+         {"body": f"# Steps\n\n![shot](/api/attachments/{img_id}/inline)\n"})
+    s, got = call("GET", f"/api/knowledge/{aid}")
+    check("the body keeps the reference", f"/api/attachments/{img_id}/inline" in got["body"])
+
+s, rows = call("GET", f"/api/attachments?entity_type=knowledge&entity_id={aid}")
+check("an article lists its files", s == 200 and len(rows or []) >= 1, f"{s}")
+
+section("Knowledge: importing a Word document")
+
+blob = build_docx()
+s, out = multipart("/api/knowledge/import/docx",
+                   {"file": (f"Vendor guide {RUN}.docx", blob, DOCX_TYPE)})
+check("a .docx becomes an article", s == 200 and out.get("article", {}).get("id"),
+      f"{s} {str(out)[:160]}")
+imported = out.get("article") if s == 200 else None
+if imported:
+    made_articles.append(imported["id"])
+    body = imported["body"]
+    check("it is titled from the document's own heading",
+          imported["title"] == f"Vendor install guide {RUN}", imported["title"])
+    # The heading that became the title must not also open the body.
+    check("and that heading is not repeated in the body",
+          not body.lstrip().startswith("# Vendor install guide"), body[:80])
+    check("headings survive", "## Prerequisites" in body and "## Steps" in body, body[:200])
+    check("bullets survive", "- JDK 17 installed" in body, body[:300])
+    check("numbered steps survive", "1. Unpack the archive" in body, body[:400])
+    check("bold survives", "**install.sh -silent**" in body, body[:400])
+    # Word's default table style carries no header markup, so markdownify
+    # invents an empty header row and demotes the real one.
+    check("a table keeps its real header rather than a blank one",
+          "| Check | Expected |" in body, [l for l in body.split("\n") if l.startswith("|")][:3])
+    check("the embedded figure became an attachment reference",
+          "/api/attachments/" in body and "![" in body, body[-200:])
+    check("it is marked a draft, because a machine wrote it",
+          imported["status"] == "DRAFT", imported["status"])
+    check("and filed as a guide", imported["kind"] == "GUIDE", imported["kind"])
+
+    s, files = call("GET", f"/api/attachments?entity_type=knowledge&entity_id={imported['id']}")
+    names = [f["filename"] for f in (files or [])]
+    check("the original document is kept alongside the text",
+          any(n.endswith(".docx") for n in names), str(names))
+    check("and the extracted figure with it",
+          any(n.endswith(".png") for n in names), str(names))
+    # An image referenced by the body must actually resolve.
+    import re as _re
+    ref = _re.search(r"/api/attachments/(\d+)/inline", body)
+    if ref:
+        # Fetched raw: `call` decodes as text and a PNG is not text.
+        try:
+            with urllib.request.urlopen(
+                    f"{B}/api/attachments/{ref.group(1)}/inline", timeout=20) as r2:
+                blob2, ctype2 = r2.read(), r2.headers.get("Content-Type", "")
+            check("the figure the body points at really is an image",
+                  blob2.startswith(b"\x89PNG") and ctype2.startswith("image/"),
+                  f"{len(blob2)}B {ctype2}")
+        except urllib.error.HTTPError as e:
+            check("the figure the body points at really is an image", False, f"got {e.code}")
+
+# Importing into an existing article appends rather than replacing.
+s, before = call("GET", f"/api/knowledge/{aid}")
+s, out2 = multipart("/api/knowledge/import/docx",
+                    {"file": (f"Appendix {RUN}.docx", blob, DOCX_TYPE)},
+                    {"article_id": str(aid)})
+check("importing into an existing article works", s == 200, f"{s} {str(out2)[:120]}")
+if s == 200:
+    check("it appends rather than overwriting",
+          before["body"] in out2["article"]["body"]
+          and "Prerequisites" in out2["article"]["body"],
+          out2["article"]["body"][:120])
+    check("and does not rename the article it was added to",
+          out2["article"]["title"] == before["title"], out2["article"]["title"])
+
+section("Knowledge: imports that should be refused")
+
+s, r = multipart("/api/knowledge/import/docx",
+                 {"file": (f"notes-{RUN}.txt", b"just text", "text/plain")})
+check("a file that is not a Word document is refused", s == 422 and "Word" in str(r), f"{s} {r}")
+
+s, r = multipart("/api/knowledge/import/docx",
+                 {"file": (f"old-{RUN}.doc", b"\xd0\xcf\x11\xe0", "application/msword")})
+check("the old binary .doc says how to convert it",
+      s == 422 and "Save As" in str(r), f"{s} {r}")
+
+s, r = multipart("/api/knowledge/import/docx",
+                 {"file": (f"broken-{RUN}.docx", b"not really a zip", DOCX_TYPE)})
+check("a corrupt .docx explains itself instead of a 500", s == 422, f"{s} {str(r)[:120]}")
+
+s, r = multipart("/api/knowledge/import/docx",
+                 {"file": (f"empty-{RUN}.docx", b"", DOCX_TYPE)})
+check("an empty file is refused", s == 422, f"{s} {str(r)[:120]}")
+
+s, r = multipart("/api/knowledge/import/docx",
+                 {"file": (f"nowhere-{RUN}.docx", blob, DOCX_TYPE)},
+                 {"article_id": "999999"})
+check("importing into an article that does not exist is a 404", s == 404, f"{s} {r}")
+
+section("Knowledge: an article's files go with it")
+
+s, doomed = call("POST", "/api/knowledge", {"title": f"KB doomed {RUN}", "kind": "NOTE"})
+s, att2 = multipart("/api/attachments",
+                    {"files": (f"doomed-{RUN}.png", PNG, "image/png")},
+                    {"entity_type": "knowledge", "entity_id": str(doomed["id"])})
+orphan_id = att2[0]["id"] if s == 200 and att2 else None
+call("DELETE", f"/api/knowledge/{doomed['id']}")
+s, left = call("GET", f"/api/attachments?entity_type=knowledge&entity_id={doomed['id']}")
+check("deleting an article takes its images with it", left == [], str(left)[:120])
+if orphan_id:
+    try:
+        with urllib.request.urlopen(f"{B}/api/attachments/{orphan_id}/inline", timeout=20):
+            gone = False
+    except urllib.error.HTTPError as e:
+        gone = e.code == 404
+    check("the bytes are really gone, not just unlisted", gone)
+
+
 # ======================================================================= servers
 section("Servers: inventory")
 
@@ -245,13 +449,57 @@ check("the server record itself carries no credential", CANARY not in json.dumps
 
 section("Servers: one click into a client")
 
+# An address only works if the machine you are sitting at can resolve it, and a
+# laptop on VPN frequently cannot. The IP is the one that means the same thing
+# from everywhere, so it wins whenever it is recorded.
+call("PUT", f"/api/servers/{sid}", {"dns_name": f"kb-dns-{RUN}.bank.local"})
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=ssh")
+check("the IP is preferred over any name",
+      (plan or {}).get("host") == "10.20.4.11", str(plan.get("host")))
+check("and the reply says which field it came from",
+      (plan or {}).get("host_field") == "IP address", str(plan.get("host_field")))
+
+call("PUT", f"/api/servers/{sid}", {"ip_address": None})
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=ssh")
+check("with no IP it falls back to the DNS name",
+      (plan or {}).get("host") == f"kb-dns-{RUN}.bank.local", str(plan.get("host")))
+check("and says so", (plan or {}).get("host_field") == "DNS name", str(plan.get("host_field")))
+
+call("PUT", f"/api/servers/{sid}", {"dns_name": None})
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=ssh")
+check("with neither it falls back to the hostname",
+      (plan or {}).get("host") == srv["hostname"], str(plan.get("host")))
+
+# An .rdp aimed at an IP cannot verify the server's identity - Kerberos needs a
+# name - so "refuse if authentication fails" would block the connection that
+# the button just made the default.
+call("PUT", f"/api/servers/{sid}", {"ip_address": "10.20.4.11"})
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
+body = ((plan or {}).get("launch") or {}).get("content", "")
+check("an .rdp dialling an IP warns rather than refusing",
+      "authentication level:i:1" in body, body[:200])
+call("PUT", f"/api/servers/{sid}", {"ip_address": None, "dns_name": f"kb-dns-{RUN}.bank.local"})
+s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
+body = ((plan or {}).get("launch") or {}).get("content", "")
+check("but keeps the strict setting when it dials a name",
+      "authentication level:i:2" in body, body[:200])
+call("PUT", f"/api/servers/{sid}", {"ip_address": "10.20.4.11"})
+
+# Searched for while it is still set - clearing it first and then looking for it
+# is how the first version of this test managed to fail honestly.
+s, rows = call("GET", f"/api/servers?limit=500&q=kb-dns-{RUN}")
+check("a server is findable by its DNS name", any(r["id"] == sid for r in (rows or [])),
+      f"got {s} {[r.get('dns_name') for r in (rows or [])][:3]}")
+call("PUT", f"/api/servers/{sid}", {"dns_name": None})
+
 s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
 if vault_on:
     check("rdp gives back a plan", s == 200 and plan.get("launch"), f"{s} {str(plan)[:120]}")
     check("it is a downloadable file, since .rdp is not a URL scheme",
           (plan.get("launch") or {}).get("kind") == "file", str(plan.get("launch"))[:120])
     body = (plan.get("launch") or {}).get("content", "")
-    check("the file names the host", f"full address:s:{srv['hostname']}" in body, body[:120])
+    check("the file names the address it dialled",
+          f"full address:s:{plan['host']}" in body, body[:120])
     check("the file names the account", "username:s:wasadmin" in body, body[:120])
     # Windows encrypts an .rdp password to one machine with DPAPI, so no
     # server could ever produce one that works. Putting a plaintext in there
@@ -267,6 +515,7 @@ check("sftp gives back a URI", s == 200 and uri.startswith("sftp://"), f"{s} {ur
 # A navigated URL is written to browser history. A bank password must not be.
 check("the URI carries no password", CANARY not in uri, uri[:100])
 check("the URI carries the username", "wasadmin@" in uri, uri[:100])
+check("and dials the IP", "10.20.4.11" in uri, uri[:100])
 check("a default port is left out of the URI", ":22" not in uri, uri[:100])
 
 s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=ssh")

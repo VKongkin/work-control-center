@@ -64,3 +64,15 @@ body {
 }
 .wcc-markdown th { background: rgb(248 250 252); font-weight: 600; }
 .wcc-markdown hr { border-color: rgb(226 232 240); }
+/* A pasted screenshot is whatever size the console window was. Cap it to the
+   column so one wide capture does not make the whole panel scroll sideways,
+   and keep the aspect ratio so it is still readable. */
+.wcc-markdown img {
+  max-width: 100%; height: auto; display: block;
+  margin: 0.5rem 0; border-radius: 0.5rem;
+  border: 1px solid rgb(226 232 240); background: rgb(248 250 252);
+}
+/* A figure on its own line is a block; one inside a sentence should not be
+   ripped out of it. */
+.wcc-markdown p > img:only-child { margin: 0.75rem 0; }
+.wcc-markdown table { display: block; overflow-x: auto; }

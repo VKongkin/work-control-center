@@ -125,6 +125,83 @@ const mine = arts.find(a => a.title === title);
 cleanup.articles.push(mine?.id);
 check('the verification reached the database', !!mine?.last_verified_at);
 
+section('Screenshots and Word documents in a runbook');
+
+// A new article has nothing to attach an image to, and the editor has to say so
+// rather than failing silently when you paste.
+await go('/knowledge');
+await p.locator('button:has-text("New Article")').first().click();
+await p.waitForTimeout(600);
+check('a new article warns that images need it saved first',
+  /Save the article/.test(await D().textContent()), (await D().textContent()).slice(0, 200));
+check('and the Image button is disabled until then',
+  await D().locator('button:has-text("Image")').first().isDisabled());
+check('but a Word document can still be imported into it',
+  !(await D().locator('button:has-text("Word")').first().isDisabled()));
+await p.keyboard.press('Escape');
+await p.waitForTimeout(400);
+if (await p.locator('button:has-text("Discard changes")').count()) {
+  await p.locator('button:has-text("Discard changes")').click();
+  await p.waitForTimeout(300);
+}
+
+// Now the saved one: paste an actual PNG through a real ClipboardEvent.
+await p.locator('[data-row-id]', { hasText: title }).first()
+  .locator('button[aria-label="Edit"]').click();
+await p.waitForTimeout(800);
+check('an existing article offers to paste', /Paste or drop a screenshot/.test(await D().textContent()));
+
+const bodyBefore = await D().locator('#f-body').inputValue();
+// Cursor to the end first. Clicking lands it wherever the pointer happened to
+// be, which in this runbook is inside the ```bash fence - and a markdown image
+// written inside a code fence is literal text, correctly.
+await D().locator('#f-body').click();
+await p.keyboard.press('Control+End');
+await p.evaluate(async () => {
+  // A 1x1 PNG, built here so nothing is fetched.
+  const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const file = new File([bytes], 'console.png', { type: 'image/png' });
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  const ta = document.querySelector('#f-body');
+  ta.focus();
+  ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+});
+await p.waitForTimeout(2500);
+
+const bodyAfter = await D().locator('#f-body').inputValue();
+check('pasting an image writes a markdown reference into the body',
+  /!\[[^\]]*\]\(\/api\/attachments\/\d+\/inline\)/.test(bodyAfter), bodyAfter.slice(-160));
+check('and keeps what was already written',
+  bodyAfter.includes(bodyBefore.trim().slice(0, 30)));
+check('the image itself is not inlined as base64, which would bloat the row',
+  !bodyAfter.includes('data:image'), bodyAfter.slice(-120));
+
+// Preview renders it rather than showing the markdown source.
+await D().locator('button:has-text("Preview")').click();
+await p.waitForTimeout(600);
+check('the preview renders the image', (await D().locator('.wcc-markdown img').count()) >= 1);
+const lazy = await D().locator('.wcc-markdown img').first().getAttribute('loading');
+check('images load lazily, so a guide full of figures does not stall', lazy === 'lazy', String(lazy));
+await D().locator('button:has-text("Edit")').first().click();
+await p.waitForTimeout(400);
+
+await p.locator('button:has-text("Save changes")').click();
+await p.waitForTimeout(1500);
+
+// The article now owns the image, and the detail view shows it.
+await p.locator('[data-row-id]', { hasText: title }).first().locator('button').first().click();
+await p.waitForTimeout(900);
+check('the saved article renders the screenshot',
+  (await D().locator('.wcc-markdown img').count()) >= 1);
+check('and the article has a Files area of its own',
+  /Files/.test(await D().textContent()));
+await p.keyboard.press('Escape');
+await p.waitForTimeout(500);
+
 section('Finding it again');
 
 await go('/knowledge');
@@ -164,7 +241,8 @@ await p.waitForTimeout(600);
 
 const srvName = `UI MQ-HUB ${stamp}`;
 await D().locator('#f-name').fill(srvName);
-await D().locator('#f-hostname').fill(`mqhub-${stamp}.bank.local`);
+await D().locator('#f-hostname').fill(`MQHUB${stamp}`);
+await D().locator('#f-dns_name').fill(`mqhub-${stamp}.bank.local`);
 await D().locator('#f-ip_address').fill('10.20.5.20');
 await D().locator('#f-environment').selectOption('DR');
 await D().locator('#f-os').fill('RHEL 8.6');
@@ -277,7 +355,10 @@ if (download) {
   const stream = await download.createReadStream();
   let rdp = '';
   for await (const chunk of stream) rdp += chunk;
-  check('the .rdp names the host', rdp.includes(`mqhub-${stamp}.bank.local`), rdp.slice(0, 120));
+  // The IP, not the name: a name only works if this machine can resolve it.
+  check('the .rdp dials the IP address', rdp.includes('full address:s:10.20.5.20'), rdp.slice(0, 160));
+  check('and warns rather than refusing, since an IP cannot be verified',
+    rdp.includes('authentication level:i:1'), rdp.slice(0, 200));
   check('the .rdp names the account', rdp.includes('username:s:svc_mq_dr'), rdp.slice(0, 160));
   // Windows will not accept a plaintext password here anyway, and a file in
   // Downloads is the last place one should be.
@@ -292,6 +373,8 @@ check('the password is on the clipboard, ready to paste', clip === SECRET,
 body = await p.locator('body').textContent();
 check('and the page says so rather than leaving you guessing',
   /password copied/i.test(body), body.slice(0, 200));
+check('and names the address it dialled, so it is not a guess',
+  /10\.20\.5\.20 \(IP address\)/.test(body), body.slice(0, 300));
 check('the password itself is still not on screen', !body.includes(SECRET));
 
 // Opening a client is a credential access and has to be logged as one.
@@ -389,7 +472,15 @@ section('Finding a server');
 
 await p.locator('#server-search').fill(`mqhub-${stamp}`);
 await p.waitForTimeout(700);
-check('searching by hostname finds it', (await p.locator('body').textContent()).includes(srvName));
+check('searching by DNS name finds it', (await p.locator('body').textContent()).includes(srvName));
+
+await p.locator('#server-search').fill(`MQHUB${stamp}`);
+await p.waitForTimeout(700);
+check('searching by hostname finds it too', (await p.locator('body').textContent()).includes(srvName));
+
+await p.locator('#server-search').fill('10.20.5.20');
+await p.waitForTimeout(700);
+check('and so does the IP', (await p.locator('body').textContent()).includes(srvName));
 await p.locator('#server-search').fill('mq 9.3 hub');
 await p.waitForTimeout(700);
 check('words across name, role and hostname all count',

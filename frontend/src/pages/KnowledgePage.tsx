@@ -1,14 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { BookOpen, CheckCircle2, Pencil, Pin, Search, Trash2, X } from 'lucide-react';
+import {
+  BookOpen, CheckCircle2, FileText, Pencil, Pin, Search, Trash2, X,
+} from 'lucide-react';
 import CrudPage, { FieldDef, ListRender } from '../components/CrudPage';
 import GroupedList from '../components/GroupedList';
 import Markdown from '../components/Markdown';
+import MarkdownEditor from '../components/MarkdownEditor';
 import { DetailRow } from '../components/DetailView';
 import { knowledgeApi, apiError } from '../api/client';
 import { requestRefresh } from '../hooks/useResource';
 import { useToast } from '../components/Toast';
-import { Badge, SelectField } from '../components/ui';
+import { Badge, Button, SelectField } from '../components/ui';
 import { KnowledgeArticle } from '../types';
 import { fmtDate } from '../lib/constants';
 import { Group } from '../lib/grouping';
@@ -45,8 +48,16 @@ const fields: FieldDef[] = [
   { key: 'tags', label: 'Tags', type: 'text', full: true, placeholder: 'was, mq, cutover — comma separated' },
   {
     key: 'body', label: 'Body', type: 'textarea', full: true,
-    placeholder: '# Steps\n\n1. …\n\nMarkdown: ``` for command blocks, - for lists.',
-    hint: 'Markdown. Code fences render as command blocks.',
+    // Drawn by MarkdownEditor instead of a plain textarea: a runbook wants a
+    // preview, a pasted screenshot and the Word document somebody emailed you.
+    render: ({ value, onChange, row, error }) => (
+      <MarkdownEditor
+        value={value}
+        onChange={onChange}
+        articleId={row?.id ?? null}
+        error={error}
+      />
+    ),
   },
   { key: 'last_verified_at', label: 'Last verified', type: 'date' },
 ];
@@ -84,6 +95,29 @@ export default function KnowledgePage() {
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(merged)) if (v) out[k] = v;
     setParams(out, { replace: true });
+  }
+
+  const docxRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  /**
+   * Import a Word document as a new article. Separate from the one inside the
+   * editor because this is the common case - somebody sends you a vendor's
+   * install guide and it should become an article without you first inventing
+   * an empty one to paste it into.
+   */
+  async function importNew(file: File) {
+    setImporting(true);
+    try {
+      const { data } = await knowledgeApi.importDocx(file);
+      const extra = data.images ? ` · ${data.images} image${data.images === 1 ? '' : 's'}` : '';
+      toast.success(`Imported "${data.article.title}"${extra}. Saved as a draft — check it before publishing.`);
+      requestRefresh('Article');
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setImporting(false);
+    }
   }
 
   async function markVerified(article: KnowledgeArticle) {
@@ -242,6 +276,21 @@ export default function KnowledgePage() {
       subtitle="Runbooks, install guides and what you worked out once"
       listParams={listParams}
       renderList={renderList}
+      headerExtra={
+        <>
+          <Button onClick={() => docxRef.current?.click()} disabled={importing}>
+            <FileText size={16} /> {importing ? 'Converting…' : 'Import Word'}
+          </Button>
+          <input
+            ref={docxRef} type="file" accept=".docx" hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) importNew(f);
+              e.target.value = '';
+            }}
+          />
+        </>
+      }
       extraDetailRows={extraDetailRows}
       // The body is rendered as markdown below; showing the raw source too
       // would put the same runbook on screen twice.

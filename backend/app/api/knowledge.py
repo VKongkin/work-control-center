@@ -8,14 +8,16 @@ the tags.
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import KnowledgeArticle
+from app.models import Attachment, KnowledgeArticle
+from app.models.attachments import MAX_FILE_BYTES
 from app.models.knowledge import KINDS, STATUSES
+from app.services import docx_import
 from app.partial import make_lenient, make_partial, merge
 from app.validation import Name, Timestamp, one_of
 
@@ -170,6 +172,12 @@ def delete_article(article_id: int, db: Session = Depends(get_db)):
     row = db.query(KnowledgeArticle).filter(KnowledgeArticle.id == article_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Article not found")
+    # The files go with it. An article's attachments include every image pasted
+    # into its body, so leaving them behind fills the database with blobs
+    # nothing references and no page can show.
+    db.query(Attachment).filter(
+        Attachment.entity_type == "knowledge", Attachment.entity_id == article_id
+    ).delete(synchronize_session=False)
     db.delete(row)
     db.commit()
     return {"message": "Article deleted"}
@@ -185,3 +193,132 @@ def known_tags(db: Session = Depends(get_db)):
             if cleaned:
                 seen.add(cleaned)
     return sorted(seen, key=str.lower)
+
+
+# ------------------------------------------------------------ Word documents
+
+DOCX_TYPES = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+)
+
+
+def _store(db: Session, article_id: int, filename: str, content_type: str,
+           blob: bytes) -> Attachment:
+    row = Attachment(
+        entity_type="knowledge", entity_id=article_id,
+        filename=filename, path=filename,
+        content_type=content_type, size=len(blob), data=blob,
+    )
+    db.add(row)
+    db.flush()          # an id, so the markdown can point at it
+    return row
+
+
+@router.post("/import/docx")
+async def import_docx(
+    file: UploadFile = File(...),
+    article_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Convert a Word document into an article.
+
+    With `article_id` the converted text is appended to that article; without
+    one a new article is created, titled from the document's own first heading.
+
+    Either way the article exists *before* any image is written, which is what
+    keeps this simple: every image is an attachment with a real owner, so there
+    is no orphan to reclaim later and no draft state to get stuck in.
+    """
+    name = (file.filename or "document.docx").strip()
+    if not name.lower().endswith((".docx", ".doc")):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{name} is not a Word document. Only .docx can be converted - "
+                   f"an older .doc has to be re-saved as .docx first.",
+        )
+
+    blob = await file.read()
+    if not blob:
+        raise HTTPException(status_code=422, detail="That file is empty.")
+    if len(blob) > MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{name} is {len(blob) // (1024 * 1024)} MB. The limit is "
+                   f"{MAX_FILE_BYTES // (1024 * 1024)} MB.",
+        )
+    if name.lower().endswith(".doc"):
+        raise HTTPException(
+            status_code=422,
+            detail="This is the old binary .doc format, which cannot be read. "
+                   "Open it in Word and Save As .docx, then import that.",
+        )
+
+    article = None
+    if article_id is not None:
+        article = db.query(KnowledgeArticle).filter(
+            KnowledgeArticle.id == article_id).first()
+        if not article:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+    if article is None:
+        # Created before conversion so images have an owner from the first
+        # byte. Titled provisionally; renamed below once the document has told
+        # us what it calls itself.
+        article = KnowledgeArticle(
+            title=name.rsplit(".", 1)[0][:255] or "Imported document",
+            kind="GUIDE", status="DRAFT",
+        )
+        db.add(article)
+        db.flush()
+        created = True
+    else:
+        created = False
+
+    stem = name.rsplit(".", 1)[0][:60]
+
+    def save_image(content_type: str, data: bytes, index: int):
+        ext = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif",
+               "image/bmp": "bmp", "image/tiff": "tif", "image/x-emf": "emf",
+               "image/x-wmf": "wmf"}.get(content_type, "bin")
+        # EMF and WMF are Word's vector formats and no browser renders them.
+        # Keeping them as attachments is still right - the content is not lost -
+        # but pointing an <img> at one would draw a broken icon in the runbook.
+        if ext in ("emf", "wmf", "bin"):
+            _store(db, article.id, f"{stem}-figure-{index}.{ext}", content_type, data)
+            return None
+        row = _store(db, article.id, f"{stem}-figure-{index}.{ext}", content_type, data)
+        return f"/api/attachments/{row.id}/inline"
+
+    try:
+        out = docx_import.convert(blob, save_image)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=f"{name} could not be read as a Word document: "
+                   f"{type(e).__name__}. If it opens in Word, try Save As .docx.",
+        )
+
+    # The original, kept beside the text it produced. Formatting nobody wants to
+    # lose, and provenance for "this is the vendor's own guide".
+    _store(db, article.id, name, DOCX_TYPES[0], blob)
+
+    markdown = out["markdown"]
+    if created and out.get("title"):
+        article.title = out["title"]
+        # The heading that became the title should not also open the body.
+        markdown = docx_import.strip_leading_heading(markdown, out["title"])
+    article.body = (f"{article.body}\n\n{markdown}"
+                    if article.body else markdown)
+    article.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(article)
+
+    return {
+        "article": {c.name: getattr(article, c.name) for c in article.__table__.columns},
+        "created": created,
+        "images": len(out["images"]),
+        "images_skipped": sum(1 for i in out["images"] if not i["url"]),
+        "warnings": out["warnings"][:10],
+    }

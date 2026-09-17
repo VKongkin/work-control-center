@@ -35,7 +35,7 @@ A professional personal work management application designed for users working i
 - 🔔 **Forgotten Items Detection**: Automatically identify neglected work items
 - 📋 **Activity History**: Complete audit trail of all changes
 - 📅 **Calendar Sync**: Outlook and ICS calendars sync in automatically; meetings you create in WCC stay yours — see [`CALENDAR.md`](CALENDAR.md)
-- 📖 **Knowledge**: Runbooks, install guides and the things you worked out once, in markdown, searchable by any word in any order, with a "still works" stamp so a stale runbook says so
+- 📖 **Knowledge**: Runbooks, install guides and the things you worked out once, in markdown, searchable by any word in any order, with a "still works" stamp so a stale runbook says so. Paste screenshots straight into the body, attach files, and import a Word document — headings, lists, tables and figures and all — so a vendor's guide becomes something you can search and correct
 - 🖥️ **Servers & credentials**: What runs where, which accounts exist, and where each credential of record lives — with optional encrypted password storage and an access log of every reveal
 - 🤖 **AI assistant (MCP) interface**: An optional agent interface so an assistant can search your runbooks and raise tasks. It is a standard MCP server, so it works with free clients — including a model running entirely on your own machine — as well as Copilot. Passwords are unreachable from it by construction — see [`COPILOT.md`](COPILOT.md)
 
