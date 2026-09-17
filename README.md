@@ -37,6 +37,7 @@ A professional personal work management application designed for users working i
 - 📅 **Calendar Sync**: Outlook and ICS calendars sync in automatically; meetings you create in WCC stay yours — see [`CALENDAR.md`](CALENDAR.md)
 - 📖 **Knowledge**: Runbooks, install guides and the things you worked out once, in markdown, searchable by any word in any order, with a "still works" stamp so a stale runbook says so. Paste screenshots straight into the body, attach files, and import a Word document — headings, lists, tables and figures and all — so a vendor's guide becomes something you can search and correct
 - 🖥️ **Servers & credentials**: What runs where, which accounts exist, and where each credential of record lives — with optional encrypted password storage and an access log of every reveal
+- 💬 **Assistant**: A chat inside WCC that searches your runbooks, reads your inventory and raises your tasks, showing every tool it used rather than hiding the work. No MCP client to install and no key to paste in each morning — point `WCC_LLM_MODEL` at a model on your own machine and it is on. Passwords are unreachable from it by construction
 - 🤖 **AI assistant (MCP) interface**: An optional agent interface so an assistant can search your runbooks and raise tasks. It is a standard MCP server, so it works with free clients — including a model running entirely on your own machine — as well as Copilot. Passwords are unreachable from it by construction — see [`COPILOT.md`](COPILOT.md)
 
 ## Tech Stack
@@ -87,10 +88,10 @@ The default configuration uses:
 - API: localhost:8000
 - Frontend: localhost:3000
 
-Two optional keys are worth setting now rather than later — `WCC_VAULT_KEY` to
-store server passwords and `WCC_AGENT_KEY` to enable the Copilot/MCP interface.
-`.env.example` shows how to generate each; [COPILOT.md](COPILOT.md) explains
-what they do.
+Three optional settings are worth doing now rather than later — `WCC_VAULT_KEY`
+to store server passwords, `WCC_LLM_MODEL` to switch on the Assistant page, and
+`WCC_AGENT_KEY` to let an outside assistant connect over MCP. `.env.example`
+shows each; [COPILOT.md](COPILOT.md) explains what they do.
 
 ### 3. Start the Application
 

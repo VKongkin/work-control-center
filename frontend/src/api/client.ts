@@ -2,7 +2,8 @@ import axios from 'axios';
 import type {
   Task, FollowUp, Project, Person, Department, Vendor, SystemRecord, Issue, Meeting,
   Category, Tool, CalendarConnection, KnowledgeArticle, ServerAccount,
-  SecretAccessEntry, VaultStatus, ConnectPlan, DocxImportResult, Server as ServerRecord,
+  SecretAccessEntry, VaultStatus, ConnectPlan, DocxImportResult,
+  ChatStatus, ChatThread, ChatMessage, ChatTurn, Server as ServerRecord,
 } from '../types';
 
 const client = axios.create({
@@ -105,6 +106,20 @@ export const knowledgeApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+};
+
+/** The chat page: threads, messages, and the loop that runs the tools. */
+export const chatApi = {
+  status: () => client.get<ChatStatus>('/chat/status'),
+  threads: () => client.get<ChatThread[]>('/chat/threads'),
+  newThread: () => client.post<ChatThread>('/chat/threads'),
+  messages: (id: number) => client.get<ChatMessage[]>(`/chat/threads/${id}/messages`),
+  deleteThread: (id: number) => client.delete(`/chat/threads/${id}`),
+  /** One turn. May take a while: the model thinks, then tools run, then it
+   *  thinks again. The timeout is generous for that reason. */
+  send: (id: number, message: string) =>
+    client.post<ChatTurn>(`/chat/threads/${id}/messages`, { message },
+      { timeout: 180000 }),
 };
 
 /**

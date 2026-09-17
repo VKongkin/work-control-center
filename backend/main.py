@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 
 # Import routers and models
-from app.api import tasks, followups, projects, people, departments, vendors, systems, issues, meetings, categories, dashboard, alerts, search, attachments, tools, calendar, knowledge, servers, agent
+from app.api import tasks, followups, projects, people, departments, vendors, systems, issues, meetings, categories, dashboard, alerts, search, attachments, tools, calendar, knowledge, servers, agent, chat
 from app.database import engine, Base, init_db
 from app.validation import register_error_handlers
 
@@ -95,6 +95,7 @@ app.include_router(calendar.router, prefix="/api/calendar", tags=["Calendar"])
 app.include_router(knowledge.router, prefix="/api/knowledge", tags=["Knowledge"])
 app.include_router(servers.router, prefix="/api/servers", tags=["Servers"])
 app.include_router(agent.router, prefix="/api/agent", tags=["Agent"])
+app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(search.router, prefix="/api/search", tags=["Search"])
 

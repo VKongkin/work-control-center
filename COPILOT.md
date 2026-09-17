@@ -9,11 +9,20 @@ which is an open standard, so *any* MCP client can use it. Copilot Studio is one
 option and it is the one that costs money. [Which assistant should I
 use?](#which-assistant-should-i-use) compares the free ones first.
 
+**There is now a shorter route.** WCC has its own Assistant page, which runs the
+same tools without any of the client setup below — no MCP configuration, no key
+pasted in each morning, no VS Code open just to ask a question. If that is all
+you wanted, read [0. The Assistant page](#0-the-assistant-page-inside-wcc) and
+stop there. The rest of this document is for connecting *someone else's*
+assistant — Copilot in VS Code, Copilot Studio, Claude Desktop — which is worth
+doing when you want WCC's answers inside a window you are already working in.
+
 **Do these in order.** Steps 1–3 take ten minutes, happen entirely on your own
 machine, and need nobody's permission or licence.
 
 | | |
 |---|---|
+| [0. The Assistant page, inside WCC](#0-the-assistant-page-inside-wcc) | One variable. No client at all |
 | [1. Turn it on](#1-turn-it-on) | Two keys in `.env`, restart |
 | [2. Prove it works](#2-prove-it-works) | `make agent-check` |
 | [3. Connect a client on your own machine](#3-connect-a-client-on-your-own-machine) | LM Studio, VS Code or Claude Desktop, over localhost |
@@ -25,11 +34,107 @@ means.
 
 ---
 
+## 0. The Assistant page, inside WCC
+
+**Sidebar → Assistant.** A chat box in WCC itself, with the same eight tools the
+MCP interface publishes. It searches your runbooks, reads your inventory and
+raises your tasks, and it shows you every tool it used rather than hiding the
+work behind a spinner.
+
+The difference from everything below is what you *don't* do: there is no MCP
+client to install, no `mcp.json`, no agent key pasted into a config, and nothing
+to start before you can ask a question. The tool-calling loop runs inside WCC's
+own backend, so the only thing WCC needs is somewhere to send the thinking.
+
+### Setting it up
+
+One variable, or two if the model is not on the same machine:
+
+```bash
+# .env
+WCC_LLM_BASE_URL=http://host.docker.internal:1234/v1
+WCC_LLM_MODEL=qwen2.5-7b-instruct
+```
+
+```bash
+docker compose up -d
+```
+
+That points it at **LM Studio** on your own machine: free, works at a bank, and
+your runbooks never leave the laptop. Install LM Studio, download a model that
+advertises **tool use / function calling** (LM Studio can filter for it — a model
+without it will ignore WCC's tools entirely), then **Developer → Start Server**.
+Nothing else in LM Studio needs configuring; WCC is the client here, not the
+host, so you can skip its `mcp.json` completely.
+
+Then open the Assistant page. If it shows an amber banner instead of a chat box,
+it is telling you exactly which variable is missing.
+
+**`host.docker.internal`, not `localhost`.** Inside the container, `localhost`
+*is* the container — the single most common way this fails. The compose files
+already map that name on plain Linux Docker as well as Docker Desktop. If you
+run the backend from source rather than in Docker, use `http://localhost:1234/v1`.
+
+`WCC_LLM_MODEL` unset means the page politely says so and does nothing. Nothing
+else in WCC is affected, so leaving it off is a perfectly good state.
+
+### Ollama instead
+
+```bash
+WCC_LLM_BASE_URL=http://host.docker.internal:11434/v1
+WCC_LLM_MODEL=qwen2.5:7b
+```
+
+### Azure OpenAI, when the company licence arrives
+
+This is the path to plan for if the bank buys Microsoft's premium licensing. The
+base URL ends at the *deployment*, the model name **is** the deployment name, and
+Azure is the only provider that fails without an api-version:
+
+```bash
+WCC_LLM_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<deployment>
+WCC_LLM_MODEL=<deployment>
+WCC_LLM_API_KEY=<the key from the Azure portal>
+WCC_LLM_API_VERSION=2024-10-21
+```
+
+Miss `WCC_LLM_API_VERSION` and Azure answers 404 with nothing that explains why.
+The key is sent as both `Authorization: Bearer` and `api-key`, so the same
+variable works whichever the endpoint expects — which is also why OpenAI itself,
+vLLM, llama.cpp or anything else OpenAI-compatible needs no code change, only a
+different base URL.
+
+Note what changes when you do this: with Azure, your runbooks and server names
+**do** leave the building on every question. That is a policy conversation, and
+it is worth having before the licence is bought rather than after.
+
+### Copilot Studio later, not instead
+
+The premium licence and this page are not alternatives. Keep this page for
+yourself, and use Copilot Studio ([step 4](#4-connect-microsoft-copilot)) if the
+point is to give *colleagues* access through Teams without each of them running
+anything. They read the same tools and the same data either way.
+
+### What it will not do
+
+It cannot read a stored password — not as a setting you could switch on, but
+because no tool returns one and the chat module cannot reach the vault at all.
+Ask for one and it will tell you which vault holds it. [The
+boundary](#the-boundary) is the same for this page as for MCP, and for the same
+structural reason.
+
+It also does not stream a word at a time. A turn here usually means calling a
+tool and then thinking again, and a half-written tool call is not something worth
+animating — so it waits, then shows you the whole turn including what it touched.
+
+---
+
 ## Which assistant should I use?
 
 | | Cost | Where your runbooks go | Verdict |
 |---|---|---|---|
-| **LM Studio + a local model** | Free, including at work | **Nowhere.** The model runs on your machine | **Start here.** Best answer for a bank |
+| **WCC's own Assistant page + a local model** | Free, including at work | **Nowhere.** The model runs on your machine | **Start here.** Nothing to install, nothing to configure each morning |
+| **LM Studio + a local model** | Free, including at work | **Nowhere.** The model runs on your machine | Same privacy, and a chat window outside WCC. Needs `mcp.json` |
 | VS Code + **GitHub Copilot Free** | Free, 50 chat requests/month | GitHub / Microsoft cloud | Fine for occasional lookups. The cap is monthly and low |
 | **Continue** or **Cline** in VS Code, pointed at a local model | Free, open source | Nowhere, with a local model | If you want it inside the editor without the cap |
 | VS Code + GitHub Copilot **Pro** | $10/month, personal | Microsoft cloud | If you already pay for it |
@@ -492,9 +597,10 @@ Two other things worth checking in VS Code if it still will not act:
 
 ## The boundary
 
-The claim is that **Copilot cannot obtain a stored password from WCC**, and it is
-worth being precise about why, because "we didn't add that tool" is not a reason
-to trust anything.
+The claim is that **no assistant can obtain a stored password from WCC** — not
+Copilot over MCP, and not the Assistant page inside WCC itself — and it is worth
+being precise about why, because "we didn't add that tool" is not a reason to
+trust anything.
 
 - No tool returns one. Not `list_servers`, not any argument to it.
 - Account names are excluded too, unless you deliberately set
@@ -505,6 +611,9 @@ to trust anything.
   module has no path to a credential to expose by accident.
 - The published OpenAPI document contains no route, operation or schema with
   "secret", "password", "credential" or "reveal" in it.
+- The Assistant page adds nothing to this. `app/api/chat.py` serves
+  `agent.TOOLS` — the same list, not a private one — and does not import the
+  vault either. A tool added once appears in both places and cannot drift apart.
 
 Each of those is a test in `tests/knowledge_suite.py`, including a sweep that
 stores a known password, calls **every tool the agent offers with several
@@ -513,7 +622,9 @@ someone adds a leaky tool later, that test goes red.
 
 Passwords are reachable only through the app's own UI, only when `WCC_VAULT_KEY`
 is set, and every reveal is written to an access log with whatever reason you
-gave.
+gave. `tests/chat_ui_suite.mjs` puts a real password in the vault and then asks
+the Assistant page for it, failing if either the password or the account holding
+it reaches the screen.
 
 ## The environment variables
 
@@ -522,6 +633,10 @@ gave.
 | `WCC_AGENT_KEY` | *(unset)* | Turns the agent interface on and is the key it requires. Unset means every agent route returns 401 |
 | `WCC_VAULT_KEY` | *(unset)* | Encrypts stored passwords. Unset means the server inventory works normally but storing a password is refused. **Not** read from or written to the database — keep it in your own password manager |
 | `WCC_AGENT_EXPOSE_ACCOUNTS` | `0` | Set to `1` to let `list_servers` include account usernames and where their credentials live. Still never a password |
+| `WCC_LLM_MODEL` | *(unset)* | The model behind the **Assistant page**. Unset means that page says so and does nothing; the rest of WCC is unaffected. Nothing to do with `WCC_AGENT_KEY`, which is for *other* assistants connecting in |
+| `WCC_LLM_BASE_URL` | `http://host.docker.internal:1234/v1` | Where that model lives. The default is LM Studio on the host — from inside the container, `localhost` is the container |
+| `WCC_LLM_API_KEY` | *(unset)* | Only for a hosted model. Sent as both `Authorization: Bearer` and `api-key`, so one variable covers OpenAI and Azure |
+| `WCC_LLM_API_VERSION` | *(unset)* | Azure OpenAI only, e.g. `2024-10-21`. Azure returns 404 without it. Leave unset for everything else |
 
 Losing `WCC_VAULT_KEY` means the stored passwords cannot be read back. That is
 the point of holding it somewhere the database is not.
@@ -536,6 +651,11 @@ the point of holding it somewhere the database is not.
 | The client connects but lists no tools | It is talking to `/api/agent/openapi.json` expecting MCP, or to `/api/agent/mcp` expecting REST. They are different endpoints |
 | Copilot Studio says it cannot reach the server | The network problem above. It is not a configuration error and no amount of retrying fixes it |
 | `409` when storing a password | `WCC_VAULT_KEY` is unset or has changed. The inventory still works; only storing and revealing are affected |
+| The Assistant page shows an amber "no model is configured" banner | `WCC_LLM_MODEL` is not reaching the container. Same fix as the first row — `.env` *and* the compose file |
+| "Could not reach the model at …" | The model's server is not running, or the URL says `localhost` where it needs `host.docker.internal`. Inside the container, `localhost` is the container |
+| "The model's reply was not in the expected shape" | That URL is answering, but it is not an OpenAI-compatible chat-completions endpoint. Check the path ends in `/v1` (or, for Azure, at the deployment with `WCC_LLM_API_VERSION` set) |
+| The Assistant answers but never uses a tool | The model does not support function calling. Pick one advertised as supporting tool use; below roughly 7B, tool use is unreliable even when supported |
+| "I stopped after 6 rounds of tool calls" | The model looped instead of answering — usually a small model with a vague question. Ask again more specifically |
 
 ## Opening a server in one click
 

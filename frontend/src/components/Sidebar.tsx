@@ -6,7 +6,7 @@ import { MUTATION_EVENT } from '../hooks/useResource';
 import {
   Home, Inbox, CheckSquare, Clock, BarChart3, AlertCircle, Users, Building,
   Package, Server, Bug, CalendarDays, Tag, Search, X, Wrench, Star, CalendarRange,
-  BookOpen, HardDrive,
+  BookOpen, HardDrive, Sparkles,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -24,6 +24,9 @@ const GROUPS = [
       { icon: Clock, label: 'Follow-ups', to: '/followups' },
       { icon: AlertCircle, label: 'Alerts', to: '/alerts' },
       { icon: Search, label: 'Search', to: '/search' },
+      // High up on purpose: this is meant to be the thing you open first in the
+      // morning, not something filed away under Build with the tooling.
+      { icon: Sparkles, label: 'Assistant', to: '/chat' },
     ],
   },
   {

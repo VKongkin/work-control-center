@@ -48,9 +48,18 @@ services:
       WCC_VAULT_KEY: ${WCC_VAULT_KEY:-}
       WCC_AGENT_KEY: ${WCC_AGENT_KEY:-}
       WCC_AGENT_EXPOSE_ACCOUNTS: ${WCC_AGENT_EXPOSE_ACCOUNTS:-0}
+      WCC_LLM_BASE_URL: ${WCC_LLM_BASE_URL:-}
+      WCC_LLM_MODEL: ${WCC_LLM_MODEL:-}
+      WCC_LLM_API_KEY: ${WCC_LLM_API_KEY:-}
+      WCC_LLM_API_VERSION: ${WCC_LLM_API_VERSION:-}
       WCC_AUTO_SYNC: ${WCC_AUTO_SYNC:-1}
       WCC_SYNC_TICK_SECONDS: ${WCC_SYNC_TICK_SECONDS:-60}
       WCC_TIMEZONE: ${WCC_TIMEZONE:-}
+    # The chat's model usually runs on the host, not in this network. Docker
+    # Desktop resolves host.docker.internal already; this line is what makes the
+    # same name work on plain Linux Docker, so one .env works on both.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       # This one stays on all interfaces by default: reaching the API from
       # another machine is the point of the agent interface. Note that the app

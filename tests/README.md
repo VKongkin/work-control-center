@@ -1,6 +1,6 @@
 # Test suites
 
-Nine suites, 1,025 checks, run against a live application.
+Eleven suites, 1,116 checks, run against a live application.
 
 | File | Checks | What it covers |
 |---|---|---|
@@ -12,6 +12,8 @@ Nine suites, 1,025 checks, run against a live application.
 | `calendar_suite.py` | 96 | Calendar sync against a feed the suite serves itself: recurrence expansion, idempotence, the edit-protection rule, the delete guard, cancellation instead of deletion, disconnecting, timezone conversion (including changing a calendar's zone after the fact), and the automatic-sync schedule — due/not-due, the off switch, interval limits, and the failure backoff. The Microsoft path is checked as far as its own boundary — the Graph calls themselves are not exercised (see the note below) |
 | `calendar_ui_suite.mjs` | 61 | The same journey through the browser: connecting, testing, syncing, editing a synced meeting, releasing a field, disconnecting, a background sync appearing in an open page without a reload, the agenda's grouping, scope filter and search, and a browser running at UTC+7 to prove a 03:30Z meeting reads as 10:30 |
 | `knowledge_suite.py` | 196 | Knowledge articles including images and Word import (a .docx is built in the test and converted: headings, bullets, numbered steps, bold, a table whose real header survives, and an embedded figure that becomes a resolvable attachment), the server inventory, the credential vault and the agent interface — including the claims each module makes about itself: that no read endpoint returns a password, that every touch of one is logged, that the vault refuses to work without a key rather than falling back, that a changed key says so instead of returning nothing, and that the agent cannot reach a credential by any tool, any argument, or any import |
+| `chat_suite.py` | 48 | The assistant's loop, driven against a scripted model the suite serves itself (`fake_model.py`): that a tool call actually runs and its result is fed back with the id it answers, that several calls in one turn all run, that a bad argument, malformed JSON or an invented tool come back as text the model can correct itself from rather than a broken turn, that a model which errors or replies in the wrong shape becomes a readable 502, that a model looping through tool calls is cut off and says so, that conversations persist and delete, that the task it claimed to create is really in the database with its plain-English priority normalised — and that the URL built for Azure OpenAI carries the api-version it refuses to work without |
+| `chat_ui_suite.mjs` | 43 | The same assistant through the browser: that the question stays on screen while the model thinks, that the answer renders as markdown, that the tool it used is named on screen and its result opens on demand, that a refused call looks different from one that worked and explains itself in English, that a follow-up question does not swallow the exchange before it, that the task list behind the page updates without a reload, that a model which falls over mid-turn leaves the question on screen to ask again from rather than losing the typing, that conversations survive a reload and can be deleted — and that with a password genuinely in the vault, neither it nor the account holding it reaches the page. Also that with no model configured the page says so and disables the box instead of failing on send |
 | `knowledge_ui_suite.mjs` | 109 | The same two pages in a browser: writing a runbook and getting it back as rendered markdown, finding it by words in any order, saying it still works, and — on Servers — storing a password without it appearing on screen or in the page source, revealing it deliberately, reading the access log that records both, opening an account in a desktop client (asserting the password really is on the clipboard and really is not in the downloaded .rdp), and grouping a multi-node estate by service so a DR node sits with its DC siblings. Also pastes a real PNG through a real ClipboardEvent and checks it becomes an attachment reference rather than a base64 blob in the row, and that every value on a server row copies on click while a web link stored in the IP field opens on double-click — with noopener, and never for a `javascript:` value |
 
 ## Running them
@@ -38,6 +40,16 @@ WCC_API=http://localhost:8000 WCC_AGENT_KEY=<the one the API has> \
   python3 tests/knowledge_suite.py
 ```
 
+The two chat suites need the API pointed at the scripted model instead of a real
+one. The model is served by the suite itself on port 8765, so the API has to be
+started already knowing where it is — set these two and restart it first:
+
+```bash
+WCC_LLM_BASE_URL=http://127.0.0.1:8765/v1 WCC_LLM_MODEL=fake-model   # on the API
+
+WCC_API=http://localhost:8000 python3 tests/chat_suite.py
+```
+
 **Browser suites** — need Playwright once:
 
 ```bash
@@ -49,6 +61,7 @@ WCC_URL=http://localhost:3000 node tests/sync_suite.mjs
 WCC_URL=http://localhost:3000 node tests/features_suite.mjs
 WCC_URL=http://localhost:3000 node tests/calendar_ui_suite.mjs
 WCC_URL=http://localhost:3000 node tests/knowledge_ui_suite.mjs
+WCC_URL=http://localhost:3000 node tests/chat_ui_suite.mjs
 ```
 
 Each exits non-zero on failure, so they drop straight into CI.

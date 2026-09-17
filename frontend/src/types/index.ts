@@ -366,6 +366,43 @@ export interface DocxImportResult {
   warnings: string[];
 }
 
+/* ------------------------------------------------------------------- chat */
+
+export interface ChatStatus {
+  enabled: boolean;
+  base_url: string;
+  model: string | null;
+  api_key_set: boolean;
+  detail: string;
+  tools: string[];
+  secrets_included: boolean;
+}
+
+export interface ChatThread {
+  id: number;
+  title: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** One stored turn. A `tool` message is the result of the call above it. */
+export interface ChatMessage {
+  id: number;
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  content: string | null;
+  created_at?: string | null;
+  tool_name?: string | null;
+  tool_calls?: {
+    id: string;
+    function: { name: string; arguments: string };
+  }[] | null;
+}
+
+export interface ChatTurn {
+  thread: { id: number; title: string };
+  messages: ChatMessage[];
+}
+
 export interface VaultStatus {
   configured: boolean;
   env_var: string;
