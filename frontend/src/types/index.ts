@@ -291,6 +291,8 @@ export interface Server {
   id: number;
   name: string;
   hostname?: string | null;
+  /** The record it resolves by, e.g. mbsapp01.bank.local. */
+  dns_name?: string | null;
   ip_address?: string | null;
   environment: string;
   os?: string | null;
@@ -341,6 +343,8 @@ export interface ConnectPlan {
   method: ConnectMethod;
   label: string;
   host: string;
+  /** Which field the address came from: "IP address", "DNS name", "hostname". */
+  host_field: string;
   port: number;
   port_is_default: boolean;
   username: string;
@@ -350,6 +354,16 @@ export interface ConnectPlan {
   launch:
     | { kind: 'uri'; value: string }
     | { kind: 'file'; filename: string; content: string; mime: string };
+}
+
+/** What a Word import did. `article.body` is the authoritative new body. */
+export interface DocxImportResult {
+  article: KnowledgeArticle;
+  created: boolean;
+  images: number;
+  /** Figures kept as attachments but not shown inline - Word's EMF/WMF vectors. */
+  images_skipped: number;
+  warnings: string[];
 }
 
 export interface VaultStatus {

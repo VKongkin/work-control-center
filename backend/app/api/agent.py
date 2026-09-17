@@ -337,6 +337,7 @@ def list_servers(db: Session, environment: Optional[str] = None,
     for word in (query or "").split():
         like = f"%{word}%"
         q = q.filter(or_(Server.name.ilike(like), Server.hostname.ilike(like),
+                         Server.dns_name.ilike(like),
                          Server.role.ilike(like), Server.ip_address.ilike(like)))
     rows = q.order_by(Server.environment, Server.name).limit(min(limit, 200)).all()
 
@@ -344,6 +345,7 @@ def list_servers(db: Session, environment: Optional[str] = None,
     for r in rows:
         entry = {
             "id": r.id, "name": r.name, "hostname": r.hostname,
+            "dns_name": r.dns_name, "ip_address": r.ip_address,
             "environment": r.environment, "os": r.os, "role": r.role,
             "notes": r.notes,
         }

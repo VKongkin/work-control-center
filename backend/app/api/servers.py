@@ -37,6 +37,7 @@ class ServerSchema(BaseModel):
     id: Optional[int] = None
     name: Name
     hostname: Optional[str] = None
+    dns_name: Optional[str] = None
     ip_address: Optional[str] = None
     environment: str = "DC"
     os: Optional[str] = None
@@ -141,7 +142,7 @@ def list_servers(
     environment: Optional[str] = Query(None),
     system_id: Optional[int] = Query(None),
     include_inactive: bool = Query(False),
-    q: Optional[str] = Query(None, description="Free text across name, hostname, IP and role"),
+    q: Optional[str] = Query(None, description="Free text across name, hostname, DNS name, IP and role"),
 ):
     query = db.query(Server)
     if not include_inactive:
@@ -154,6 +155,7 @@ def list_servers(
         like = f"%{word}%"
         query = query.filter(
             or_(Server.name.ilike(like), Server.hostname.ilike(like),
+                Server.dns_name.ilike(like),
                 Server.ip_address.ilike(like), Server.role.ilike(like),
                 Server.notes.ilike(like))
         )
@@ -363,6 +365,27 @@ CONNECT_METHODS = {
 }
 
 
+# The IP first, deliberately.
+#
+# A name only works if the workstation can resolve it, and a middleware
+# engineer's laptop frequently cannot: split-horizon DNS, a VPN that does not
+# push the internal suffix, a DR box whose record points at the DC one until
+# somebody switches it. The IP is the one thing that means the same from
+# everywhere. DNS name and hostname remain as fallbacks, in that order,
+# because a box with no IP recorded is still worth connecting to.
+ADDRESS_ORDER = (("ip_address", "IP address"),
+                 ("dns_name", "DNS name"),
+                 ("hostname", "hostname"))
+
+
+def _address_for(server: Server) -> tuple:
+    for field, label in ADDRESS_ORDER:
+        value = (getattr(server, field, None) or "").strip()
+        if value:
+            return value, label
+    return "", ""
+
+
 def _safe_filename(raw: str) -> str:
     """A download name that survives Windows. Backslashes are the usual culprit,
     since a domain account is written BANK\\svc_app and that is a path."""
@@ -370,15 +393,29 @@ def _safe_filename(raw: str) -> str:
     return (cleaned or "connection")[:80]
 
 
-def _rdp_file(host: str, port: int, username: str) -> str:
+def _rdp_file(host: str, port: int, username: str, by_ip: bool) -> str:
     """A minimal .rdp. Only the lines that change anything are included."""
     address = host if port == 3389 else f"{host}:{port}"
+
+    # `authentication level` is 0 = connect silently, 1 = warn, 2 = refuse if
+    # the server's identity cannot be verified.
+    #
+    # Connecting to a domain-joined box *by IP* normally cannot verify it:
+    # Kerberos looks up a service principal by name, an IP has none, and it
+    # falls back to NTLM. At level 2 that means the connection is refused
+    # outright - so a file that hard-codes 2 would make the button appear
+    # broken the moment it dials an IP, which is now the default. Level 1 is
+    # what mstsc does when you type an address yourself: it warns, and you
+    # decide. Connecting by name keeps the stricter setting, because there it
+    # costs nothing.
+    level = 1 if by_ip else 2
+
     return "\r\n".join([
         f"full address:s:{address}",
         f"username:s:{username}",
         "prompt for credentials:i:1",
         "screen mode id:i:2",
-        "authentication level:i:2",
+        f"authentication level:i:{level}",
         "redirectclipboard:i:1",
         "",
     ])
@@ -405,11 +442,11 @@ def connect(account_id: int, method: str = Query(...), db: Session = Depends(get
     if not server:
         raise HTTPException(status_code=404, detail="That account's server is gone.")
 
-    host = (server.hostname or server.ip_address or "").strip()
+    host, host_field = _address_for(server)
     if not host:
         raise HTTPException(
             status_code=422,
-            detail=f"{server.name} has neither a hostname nor an IP address, so there "
+            detail=f"{server.name} has no IP address, DNS name or hostname, so there "
                    f"is nothing to connect to. Add one and try again.",
         )
 
@@ -430,7 +467,8 @@ def connect(account_id: int, method: str = Query(...), db: Session = Depends(get
         launch = {
             "kind": "file",
             "filename": _safe_filename(f"{server.name}-{account.username}") + ".rdp",
-            "content": _rdp_file(host, port, account.username),
+            "content": _rdp_file(host, port, account.username,
+                                 by_ip=host_field == "IP address"),
             "mime": "application/x-rdp",
         }
     else:
@@ -449,6 +487,9 @@ def connect(account_id: int, method: str = Query(...), db: Session = Depends(get
         "method": method,
         "label": spec["label"],
         "host": host,
+        # Which field it came from, so the UI can say "10.20.4.11 (IP address)"
+        # rather than leaving you to guess what it dialled.
+        "host_field": host_field,
         "port": port,
         "port_is_default": not explicit,
         "username": account.username,

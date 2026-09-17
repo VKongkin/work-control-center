@@ -42,7 +42,7 @@ const ACCOUNT_TYPES = [
 ];
 
 const blankServer = {
-  name: '', hostname: '', ip_address: '', environment: 'DC', os: '', role: '',
+  name: '', hostname: '', dns_name: '', ip_address: '', environment: 'DC', os: '', role: '',
   ssh_port: '', rdp_port: '', system_id: '', notes: '',
 };
 
@@ -147,7 +147,8 @@ export default function ServersPage() {
   function openEditServer(s: Server) {
     setEditingServer(s);
     serverForm.reset({
-      name: s.name, hostname: s.hostname ?? '', ip_address: s.ip_address ?? '',
+      name: s.name, hostname: s.hostname ?? '', dns_name: s.dns_name ?? '',
+      ip_address: s.ip_address ?? '',
       environment: s.environment, os: s.os ?? '', role: s.role ?? '',
       ssh_port: s.ssh_port ? String(s.ssh_port) : '',
       rdp_port: s.rdp_port ? String(s.rdp_port) : '',
@@ -163,7 +164,8 @@ export default function ServersPage() {
     const payload = {
       ...v,
       system_id: v.system_id ? Number(v.system_id) : null,
-      hostname: v.hostname || null, ip_address: v.ip_address || null,
+      hostname: v.hostname || null, dns_name: v.dns_name || null,
+      ip_address: v.ip_address || null,
       os: v.os || null, role: v.role || null, notes: v.notes || null,
       // Blank means "the usual one", which is stored as null so the connect
       // links can leave the port out of the URL entirely.
@@ -222,7 +224,7 @@ export default function ServersPage() {
     const q = query.trim().toLowerCase();
     if (!q) return true;
     return q.split(/\s+/).every((word) =>
-      [s.name, s.hostname, s.ip_address, s.role, s.os, s.notes]
+      [s.name, s.hostname, s.dns_name, s.ip_address, s.role, s.os, s.notes]
         .some((v) => (v ?? '').toLowerCase().includes(word)));
   });
 
@@ -381,11 +383,21 @@ export default function ServersPage() {
             value={serverForm.values.name} onChange={(v: string) => serverForm.setField('name', v)}
             error={serverForm.errors.name} onBlur={() => serverForm.blur('name')}
             placeholder="MBS-APP-01" />
-          <TextField name="hostname" label="Hostname"
-            value={serverForm.values.hostname} onChange={(v: string) => serverForm.setField('hostname', v)}
-            placeholder="mbsapp01.bank.local" />
           <TextField name="ip_address" label="IP address"
-            value={serverForm.values.ip_address} onChange={(v: string) => serverForm.setField('ip_address', v)} />
+            value={serverForm.values.ip_address}
+            onChange={(v: string) => serverForm.setField('ip_address', v)}
+            placeholder="10.20.4.11"
+            hint="What the connect buttons dial. A name only works if your machine can resolve it." />
+          <TextField name="dns_name" label="DNS name"
+            value={serverForm.values.dns_name}
+            onChange={(v: string) => serverForm.setField('dns_name', v)}
+            placeholder="mbsapp01.bank.local"
+            hint="The record it resolves by. Used if there is no IP." />
+          <TextField name="hostname" label="Hostname"
+            value={serverForm.values.hostname}
+            onChange={(v: string) => serverForm.setField('hostname', v)}
+            placeholder="MBSAPP01"
+            hint="What the box calls itself." />
           <SelectField name="environment" label="Environment" options={ENVIRONMENTS}
             value={serverForm.values.environment}
             onChange={(v: string) => serverForm.setField('environment', v)} />
@@ -557,7 +569,7 @@ function ServerRow({
   // on every row is noise. The role is not repeated either when it *is* the
   // heading - see `showSystem`.
   const meta = [
-    server.hostname, server.ip_address, server.os, server.role,
+    server.ip_address, server.dns_name, server.hostname, server.os, server.role,
     showSystem && systemName !== '—' ? systemName : null,
   ].filter(Boolean);
 
@@ -689,7 +701,8 @@ function AccountRow({
         window.location.href = data.launch.value;
       }
 
-      const where = `${data.host}${data.port_is_default ? '' : ':' + data.port}`;
+      const where = `${data.host}${data.port_is_default ? '' : ':' + data.port}`
+        + (data.host_field ? ` (${data.host_field})` : '');
       if (data.secret && copied) {
         toast.success(`${data.label}: password copied — paste it when asked (${where})`);
       } else if (data.secret_error) {
@@ -810,7 +823,7 @@ function AccountRow({
             key={method}
             onClick={() => connect(method)}
             disabled={connecting !== null}
-            title={`Open ${label} for ${account.username} on ${server.hostname || server.ip_address || server.name}`}
+            title={`Open ${label} for ${account.username} on ${server.ip_address || server.dns_name || server.hostname || server.name}`}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-50"
           >
             <Icon size={13} />

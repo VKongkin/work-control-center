@@ -559,6 +559,30 @@ filled in for you, and that is the part you would otherwise be hunting for.
 Opening a client is recorded in the access log exactly like a reveal, because
 the plaintext leaves either way.
 
+### Which address it dials
+
+Three fields, and they are not interchangeable:
+
+| Field | Example | What it is for |
+|---|---|---|
+| **IP address** | `10.20.4.11` | **What the buttons dial.** |
+| **DNS name** | `mbsapp01.bank.local` | The record it resolves by. Used when there is no IP |
+| **Hostname** | `MBSAPP01` | What the box calls itself. The last resort |
+
+The IP wins because a name only works if the machine you are sitting at can
+resolve it, and a laptop on VPN frequently cannot — split-horizon DNS, a suffix
+the VPN does not push, a DR record still pointing at the DC box. The IP means
+the same thing from everywhere. The toast names the address it used and which
+field it came from, so it is never a guess.
+
+One consequence worth knowing. An `.rdp` aimed at an IP cannot verify the
+server's identity: Kerberos looks up a service principal by name and an IP has
+none, so it falls back to NTLM. The file therefore sets
+`authentication level:i:1` — warn, and let you decide — when it dials an IP,
+because the stricter `2` means *refuse to connect* and would make the button
+look broken. When it dials a name it keeps `2`, where strictness costs nothing.
+Expect Windows to ask once whether you trust the machine.
+
 ### Ports
 
 Leave the port fields on a server blank unless they are unusual. Blank means 22

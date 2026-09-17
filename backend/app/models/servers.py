@@ -23,7 +23,12 @@ class Server(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
+    # Three different things that all get called "the address":
+    #   hostname   - what the box calls itself, e.g. MBSAPP01
+    #   dns_name   - the record it resolves by, e.g. mbsapp01.bank.local
+    #   ip_address - what the connect buttons actually dial
     hostname = Column(String(255), nullable=True)
+    dns_name = Column(String(255), nullable=True)
     ip_address = Column(String(64), nullable=True)
     environment = Column(String(16), nullable=False, default="DC")
 
