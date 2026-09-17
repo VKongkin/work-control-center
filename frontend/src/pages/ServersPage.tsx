@@ -14,6 +14,7 @@ import {
 } from '../components/ui';
 import { ServerAccount, SecretAccessEntry, Server, VaultStatus, ConnectMethod } from '../types';
 import { copyText, downloadText } from '../lib/clipboard';
+import Copyable from '../components/Copyable';
 import {
   GroupBy, ServerGroup, envTone, groupServers,
 } from '../lib/serverGroups';
@@ -568,10 +569,18 @@ function ServerRow({
   // The system is the group heading when grouping by service, so repeating it
   // on every row is noise. The role is not repeated either when it *is* the
   // heading - see `showSystem`.
-  const meta = [
-    server.ip_address, server.dns_name, server.hostname, server.os, server.role,
-    showSystem && systemName !== '—' ? systemName : null,
-  ].filter(Boolean);
+  //
+  // Every one of these is something you are about to retype into a terminal, a
+  // browser or a ticket, so each is its own copy button rather than a run of
+  // dot-separated text you have to select by hand without catching the dots.
+  const meta: { label: string; value: string }[] = [
+    { label: 'IP address', value: server.ip_address ?? '' },
+    { label: 'DNS name', value: server.dns_name ?? '' },
+    { label: 'Hostname', value: server.hostname ?? '' },
+    { label: 'Operating system', value: server.os ?? '' },
+    { label: 'What it runs', value: server.role ?? '' },
+    { label: 'System', value: showSystem && systemName !== '—' ? systemName : '' },
+  ].filter((m) => m.value.trim());
 
   return (
     <div className="flex items-start gap-3 px-4 py-2.5 transition-colors hover:bg-slate-50/80">
@@ -601,7 +610,14 @@ function ServerRow({
           )}
         </div>
         {meta.length > 0 && (
-          <p className="mt-0.5 truncate text-xs text-slate-500">{meta.join(' · ')}</p>
+          <div className="mt-0.5 flex flex-wrap items-center text-xs text-slate-500">
+            {meta.map((m, i) => (
+              <span key={m.label} className="inline-flex min-w-0 max-w-full items-center">
+                {i > 0 && <span className="px-0.5 text-slate-300">·</span>}
+                <Copyable value={m.value} label={m.label} />
+              </span>
+            ))}
+          </div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">

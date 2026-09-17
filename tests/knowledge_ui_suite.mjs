@@ -385,6 +385,116 @@ check('opening a client is written to the access log',
 check('the log records which client', logNow.some(e => /Remote Desktop/.test(e.detail || '')),
   JSON.stringify(logNow.slice(0, 3)));
 
+section('Every value on a row is one click from the clipboard');
+
+// These fields exist to be retyped into a terminal, a browser or a ticket, so
+// each is a button that copies itself.
+const copyHost = `copyprobe-${stamp}.bank.local`;
+const consoleUrl = `https://console-${stamp}.bank.local:8443/tmui`;
+const copySrv = await api('POST', '/api/servers', {
+  name: `UI COPY-01 ${stamp}`, environment: 'DC',
+  ip_address: '10.99.1.1', dns_name: copyHost, hostname: `COPYPROBE${stamp}`,
+  os: 'RHEL 9.2', role: `Copy probe ${stamp}`,
+});
+cleanup.servers.push(copySrv.id);
+// A management console lives in the IP field as often as an address does.
+const linkSrv = await api('POST', '/api/servers', {
+  name: `UI LINK-01 ${stamp}`, environment: 'DC',
+  ip_address: consoleUrl, hostname: `LINKPROBE${stamp}`, role: `Copy probe ${stamp}`,
+});
+cleanup.servers.push(linkSrv.id);
+// Something that must never be treated as a link.
+const nastySrv = await api('POST', '/api/servers', {
+  name: `UI NASTY-01 ${stamp}`, environment: 'DC',
+  ip_address: 'javascript:alert(1)', role: `Copy probe ${stamp}`,
+});
+cleanup.servers.push(nastySrv.id);
+
+await go('/servers');
+await p.locator('#server-search').fill(`Copy probe ${stamp}`);
+await p.waitForTimeout(700);
+
+const plainRow = p.locator('[data-row-id]', { hasText: `UI COPY-01 ${stamp}` }).first();
+for (const label of ['IP address', 'DNS name', 'Hostname', 'Operating system', 'What it runs']) {
+  check(`${label} is a copy button`,
+    (await plainRow.locator(`[data-copyable="${label}"]`).count()) === 1);
+}
+
+// Click one and read the clipboard back.
+await p.evaluate(() => navigator.clipboard.writeText('nothing-yet'));
+await plainRow.locator('[data-copyable="DNS name"]').click();
+await p.waitForTimeout(500);
+check('clicking a value copies it',
+  (await p.evaluate(() => navigator.clipboard.readText())) === copyHost,
+  await p.evaluate(() => navigator.clipboard.readText()));
+check('and says so on the chip itself, not in a toast',
+  (await plainRow.locator('[data-copyable="DNS name"] svg').count()) >= 1);
+
+await plainRow.locator('[data-copyable="Operating system"]').click();
+await p.waitForTimeout(500);
+check('every field copies, not just the address',
+  (await p.evaluate(() => navigator.clipboard.readText())) === 'RHEL 9.2');
+
+// Copying must not expand the row - the accounts list is not what you asked for.
+check('copying does not open the row',
+  (await plainRow.locator('button[aria-label^="Show accounts"]').getAttribute('aria-expanded')) === 'false');
+
+const linkRow = p.locator('[data-row-id]', { hasText: `UI LINK-01 ${stamp}` }).first();
+const linkChip = linkRow.locator('[data-copyable="IP address"]');
+check('a web link in the IP field is marked as openable',
+  (await linkChip.locator('svg').count()) >= 1);
+check('and says both gestures in its tooltip',
+  /double-click to open/.test(await linkChip.getAttribute('title') ?? ''),
+  await linkChip.getAttribute('title'));
+
+// Double-click opens a tab. Asserted by recording the window.open call rather
+// than by catching the tab: the console host does not resolve from here, so the
+// real tab opens as about:blank and is torn down before it can be inspected -
+// and the call arguments are the part that matters anyway, flags included.
+await p.evaluate(() => {
+  window.__opens = [];
+  const real = window.open;
+  window.open = (...args) => { window.__opens.push(args); return real.apply(window, args); };
+});
+await p.evaluate(() => navigator.clipboard.writeText('before-the-double-click'));
+await linkChip.dblclick();
+await p.waitForTimeout(900);
+const opens = await p.evaluate(() => window.__opens);
+check('double-clicking a link opens it in a new tab',
+  opens.length === 1 && opens[0][0] === consoleUrl && opens[0][1] === '_blank',
+  JSON.stringify(opens));
+// noopener stops the opened page reaching back through window.opener;
+// noreferrer keeps an internal URL out of that site's logs.
+check('and opens it without handing over the opener or the referrer',
+  /noopener/.test(opens[0]?.[2] ?? '') && /noreferrer/.test(opens[0]?.[2] ?? ''),
+  String(opens[0]?.[2]));
+check('and the deferred copy was cancelled, not fired as well',
+  (await p.evaluate(() => navigator.clipboard.readText())) === 'before-the-double-click',
+  await p.evaluate(() => navigator.clipboard.readText()));
+
+// A single click on a link still copies, just after the double-click window.
+await linkChip.click();
+await p.waitForTimeout(900);
+check('a single click on a link still copies it',
+  (await p.evaluate(() => navigator.clipboard.readText())) === consoleUrl,
+  await p.evaluate(() => navigator.clipboard.readText()));
+
+// A stored javascript: value must never be openable.
+const nastyChip = p.locator('[data-row-id]', { hasText: `UI NASTY-01 ${stamp}` }).first()
+  .locator('[data-copyable="IP address"]');
+check('a javascript: value is not treated as a link',
+  !/double-click to open/.test(await nastyChip.getAttribute('title') ?? ''),
+  await nastyChip.getAttribute('title'));
+await p.evaluate(() => { window.__opens = []; });
+await nastyChip.dblclick();
+await p.waitForTimeout(700);
+check('and double-clicking it opens nothing at all',
+  (await p.evaluate(() => window.__opens)).length === 0,
+  JSON.stringify(await p.evaluate(() => window.__opens)));
+
+await p.locator('button[aria-label="Clear search"]').click();
+await p.waitForTimeout(500);
+
 section('An estate you can actually read');
 
 // The complaint this answers: grouping by environment put every unrelated box
