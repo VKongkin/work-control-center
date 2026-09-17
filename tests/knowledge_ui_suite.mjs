@@ -357,8 +357,14 @@ if (download) {
   for await (const chunk of stream) rdp += chunk;
   // The IP, not the name: a name only works if this machine can resolve it.
   check('the .rdp dials the IP address', rdp.includes('full address:s:10.20.5.20'), rdp.slice(0, 160));
+  // Windows: 1 = do not connect, 2 = warn and let me choose. Dialling an IP
+  // cannot verify the certificate, so 1 ends at "You cannot proceed because
+  // authentication is required" with only an OK button - a dead end where the
+  // person is perfectly able to judge the risk themselves.
   check('and warns rather than refusing, since an IP cannot be verified',
-    rdp.includes('authentication level:i:1'), rdp.slice(0, 200));
+    rdp.includes('authentication level:i:2'), rdp.slice(0, 200));
+  check('the file never carries the setting that refuses outright',
+    !rdp.includes('authentication level:i:1'), rdp.slice(0, 200));
   check('the .rdp names the account', rdp.includes('username:s:svc_mq_dr'), rdp.slice(0, 160));
   // Windows will not accept a plaintext password here anyway, and a file in
   // Downloads is the last place one should be.

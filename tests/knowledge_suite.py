@@ -470,20 +470,34 @@ s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=ssh")
 check("with neither it falls back to the hostname",
       (plan or {}).get("host") == srv["hostname"], str(plan.get("host")))
 
-# An .rdp aimed at an IP cannot verify the server's identity - Kerberos needs a
-# name - so "refuse if authentication fails" would block the connection that
-# the button just made the default.
-call("PUT", f"/api/servers/{sid}", {"ip_address": "10.20.4.11"})
-s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
-body = ((plan or {}).get("launch") or {}).get("content", "")
-check("an .rdp dialling an IP warns rather than refusing",
-      "authentication level:i:1" in body, body[:200])
-call("PUT", f"/api/servers/{sid}", {"ip_address": None, "dns_name": f"kb-dns-{RUN}.bank.local"})
-s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
-body = ((plan or {}).get("launch") or {}).get("content", "")
-check("but keeps the strict setting when it dials a name",
-      "authentication level:i:2" in body, body[:200])
-call("PUT", f"/api/servers/{sid}", {"ip_address": "10.20.4.11"})
+# Verifying a server's identity routinely fails here - dialling a domain-joined
+# box by IP leaves Kerberos no principal to look up, and the certificate names
+# the host, not the address. Windows must warn and let the person decide, which
+# is value 2. Value 1 means "do not connect" and produces a dead end with an OK
+# button; an earlier version of this shipped 1 and this test asserted it,
+# calling it "warns rather than refusing". Hence the check below on the number
+# AND on the sentence it stands for.
+AUTH_REFUSE = "authentication level:i:1"
+AUTH_WARN = "authentication level:i:2"
+AUTH_SILENT = "authentication level:i:0"
+
+for label, patch in (("an IP", {"ip_address": "10.20.4.11", "dns_name": None}),
+                     ("a DNS name", {"ip_address": None,
+                                     "dns_name": f"kb-dns-{RUN}.bank.local"})):
+    call("PUT", f"/api/servers/{sid}", patch)
+    s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
+    body = ((plan or {}).get("launch") or {}).get("content", "")
+    check(f"an .rdp dialling {label} lets Windows warn and ask",
+          AUTH_WARN in body, body[:200])
+    check(f"and never refuses outright when it dials {label}",
+          AUTH_REFUSE not in body, body[:200])
+    check(f"nor silences the certificate warning when it dials {label}",
+          AUTH_SILENT not in body, body[:200])
+
+# The loop left it dialling a name; put the IP back, because everything after
+# this was written against a server that has one.
+call("PUT", f"/api/servers/{sid}",
+     {"ip_address": "10.20.4.11", "dns_name": f"kb-dns-{RUN}.bank.local"})
 
 # Searched for while it is still set - clearing it first and then looking for it
 # is how the first version of this test managed to fail honestly.

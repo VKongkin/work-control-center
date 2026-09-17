@@ -393,29 +393,38 @@ def _safe_filename(raw: str) -> str:
     return (cleaned or "connection")[:80]
 
 
-def _rdp_file(host: str, port: int, username: str, by_ip: bool) -> str:
+# What Windows does when it cannot verify the server's identity. Microsoft's
+# values, which are not in the order you would guess:
+#
+#   0  connect anyway, say nothing
+#   1  do not connect          <- "You cannot proceed because authentication
+#                                  is required", with only an OK button
+#   2  warn, and let me choose <- "Do you want to connect despite these
+#                                  certificate errors?", Yes / No
+#   3  unspecified (the default when the line is absent)
+#
+# Verifying the identity routinely fails here and that is not a fault: dialling
+# a domain-joined box by IP gives Kerberos no service principal to look up, so
+# it falls back to NTLM, and the machine's certificate names the host rather
+# than the address. Typing the same address into mstsc by hand behaves the same
+# way - it warns - which is why 2 is the right value. It is also the setting
+# this person has already been accepting every time they connect manually.
+#
+# Not 0: suppressing a certificate warning on a bank's network is not a
+# decision this file gets to make on someone's behalf.
+RDP_AUTH_WARN_AND_ASK = 2
+
+
+def _rdp_file(host: str, port: int, username: str) -> str:
     """A minimal .rdp. Only the lines that change anything are included."""
     address = host if port == 3389 else f"{host}:{port}"
-
-    # `authentication level` is 0 = connect silently, 1 = warn, 2 = refuse if
-    # the server's identity cannot be verified.
-    #
-    # Connecting to a domain-joined box *by IP* normally cannot verify it:
-    # Kerberos looks up a service principal by name, an IP has none, and it
-    # falls back to NTLM. At level 2 that means the connection is refused
-    # outright - so a file that hard-codes 2 would make the button appear
-    # broken the moment it dials an IP, which is now the default. Level 1 is
-    # what mstsc does when you type an address yourself: it warns, and you
-    # decide. Connecting by name keeps the stricter setting, because there it
-    # costs nothing.
-    level = 1 if by_ip else 2
 
     return "\r\n".join([
         f"full address:s:{address}",
         f"username:s:{username}",
         "prompt for credentials:i:1",
         "screen mode id:i:2",
-        f"authentication level:i:{level}",
+        f"authentication level:i:{RDP_AUTH_WARN_AND_ASK}",
         "redirectclipboard:i:1",
         "",
     ])
@@ -467,8 +476,7 @@ def connect(account_id: int, method: str = Query(...), db: Session = Depends(get
         launch = {
             "kind": "file",
             "filename": _safe_filename(f"{server.name}-{account.username}") + ".rdp",
-            "content": _rdp_file(host, port, account.username,
-                                 by_ip=host_field == "IP address"),
+            "content": _rdp_file(host, port, account.username),
             "mime": "application/x-rdp",
         }
     else:

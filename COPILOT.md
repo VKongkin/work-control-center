@@ -697,11 +697,26 @@ field it came from, so it is never a guess.
 
 One consequence worth knowing. An `.rdp` aimed at an IP cannot verify the
 server's identity: Kerberos looks up a service principal by name and an IP has
-none, so it falls back to NTLM. The file therefore sets
-`authentication level:i:1` — warn, and let you decide — when it dials an IP,
-because the stricter `2` means *refuse to connect* and would make the button
-look broken. When it dials a name it keeps `2`, where strictness costs nothing.
-Expect Windows to ask once whether you trust the machine.
+none, so it falls back to NTLM, and the machine's certificate names the host
+rather than the address. So Windows will ask whether you trust the machine —
+*"Do you want to connect despite these certificate errors?"*, **Yes** / **No** —
+exactly as it does when you type the same address into mstsc yourself. Say yes
+and tick the box, and it stops asking for that machine.
+
+The file sets `authentication level:i:2` for that reason. Microsoft's numbering
+is not in the order you would guess, and it is worth writing down because
+getting it backwards produces a dead end rather than an error:
+
+| | |
+|---|---|
+| `0` | connect anyway, no warning |
+| `1` | **do not connect** — *"You cannot proceed because authentication is required"*, with only an **OK** button |
+| `2` | **warn, and let me choose** — Yes / No. What WCC uses, and what mstsc does by default |
+| `3` | unspecified |
+
+If you ever see the OK-only dialog, something is forcing `1` — either an edited
+`.rdp` or the *Configure server authentication for client* group policy set to
+"Do not connect".
 
 ### Ports
 
