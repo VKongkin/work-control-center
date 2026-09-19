@@ -3,7 +3,8 @@ import type {
   Task, FollowUp, Project, Person, Department, Vendor, SystemRecord, Issue, Meeting,
   Category, Tool, CalendarConnection, KnowledgeArticle, ServerAccount,
   SecretAccessEntry, VaultStatus, ConnectPlan, DocxImportResult,
-  ChatStatus, ChatThread, ChatMessage, ChatTurn, Server as ServerRecord,
+  ChatStatus, ChatThread, ChatMessage, ChatTurn, ImportStatus, ImportResult,
+  Server as ServerRecord,
 } from '../types';
 
 const client = axios.create({
@@ -154,6 +155,17 @@ export const agentApi = {
 export const toolFiles = {
   manifest: (id: number) => client.get(`/tools/${id}/manifest`),
   entryUrl: (id: number, entry: string) => `/api/tools/${id}/serve/${entry}`,
+
+  /** Whether importing from a link is switched on, and from which hosts. */
+  importStatus: () => client.get<ImportStatus>('/tools/import/status'),
+
+  /**
+   * Build a tool from a repository link. Generous timeout: this is a download
+   * from someone else's server, and a 40MB archive over a bank's link is not
+   * quick.
+   */
+  importLink: (body: { url: string; name?: string; tool_id?: number }) =>
+    client.post<ImportResult>('/tools/import', body, { timeout: 120000 }),
 };
 
 export const dashboardApi = {

@@ -1,17 +1,18 @@
 # Test suites
 
-Eleven suites, 1,128 checks, run against a live application.
+Twelve suites, 1,188 checks, run against a live application.
 
 | File | Checks | What it covers |
 |---|---|---|
 | `api_suite.py` | 229 | Every endpoint and method, all 10 entities' CRUD lifecycles, validation (required, blank, enums, uniqueness, foreign keys), 404s, filters, pagination, cascade behaviour, date handling, unicode, the meetings diary ordering and date window, and the issues severity ordering and filters |
 | `ui_suite.mjs` | 171 | All 13 pages in a real browser: create/edit/delete through the forms, validation behaviour, archive/restore, unsaved-changes guard, filters, routing, keyboard, mobile layout, console errors, and that Tasks and Issues group most-urgent-first with their finished work folded away |
 | `followups_suite.mjs` | 96 | The follow-ups page in depth: all three waiting-for types, all five statuses, quick actions, the four dates, overdue signalling, alert rules, field-level update integrity |
-| `features_suite.mjs` | 42 | Detail views, file uploads to tasks, tool folders, the sandboxed tool runner, pinning |
+| `features_suite.mjs` | 50 | Detail views, file uploads to tasks, tool folders, the sandboxed tool runner, pinning, and the import-from-link dialog: that a link becomes a runnable tool without a page refresh, and that a host outside the allowlist is refused where the person is looking rather than swallowed |
 | `sync_suite.mjs` | 25 | Live data: a Directory record created, renamed, archived, restored or deleted must reach every form that references it without a page refresh |
 | `calendar_suite.py` | 96 | Calendar sync against a feed the suite serves itself: recurrence expansion, idempotence, the edit-protection rule, the delete guard, cancellation instead of deletion, disconnecting, timezone conversion (including changing a calendar's zone after the fact), and the automatic-sync schedule — due/not-due, the off switch, interval limits, and the failure backoff. The Microsoft path is checked as far as its own boundary — the Graph calls themselves are not exercised (see the note below) |
 | `calendar_ui_suite.mjs` | 61 | The same journey through the browser: connecting, testing, syncing, editing a synced meeting, releasing a field, disconnecting, a background sync appearing in an open page without a reload, the agenda's grouping, scope filter and search, and a browser running at UTC+7 to prove a 03:30Z meeting reads as 10:30 |
 | `knowledge_suite.py` | 200 | Knowledge articles including images and Word import (a .docx is built in the test and converted: headings, bullets, numbered steps, bold, a table whose real header survives, and an embedded figure that becomes a resolvable attachment), the server inventory, the credential vault and the agent interface — including the claims each module makes about itself: that no read endpoint returns a password, that every touch of one is logged, that the vault refuses to work without a key rather than falling back, that a changed key says so instead of returning nothing, and that the agent cannot reach a credential by any tool, any argument, or any import |
+| `import_suite.py` | 52 | Building a tool out of a repository link, driven against a forge the suite serves itself (`fake_forge.py`) because github.com will not produce the interesting cases on request. A bare link, a branch that is not main, a folder inside a repository, a zip, a single file; and then the half that matters - the cloud metadata address refused, a redirect that leaves the allowlist refused at the hop rather than followed, a tar entry carrying `../../../../etc/passwd` re-rooted instead of obeyed, a symlink skipped, an archive that unpacks to more than the cap stopped before it is written, and a host that merely ends with an allowed host's letters kept out |
 | `chat_suite.py` | 55 | The assistant's loop, driven against a scripted model the suite serves itself (`fake_model.py`): that a tool call actually runs and its result is fed back with the id it answers, that several calls in one turn all run, that a bad argument, malformed JSON or an invented tool come back as text the model can correct itself from rather than a broken turn, that a model which errors or replies in the wrong shape becomes a readable 502, that a model looping through tool calls is cut off and says so, that conversations persist and delete, that the task it claimed to create is really in the database with its plain-English priority normalised — and that the base URL each provider documents (Docker Model Runner, Groq, Gemini, Ollama, LM Studio) is joined into the path that provider actually serves, including the api-version Azure refuses to work without and the trailing slash Google publishes. The compose overlay that has Docker serve the model is checked against the same code, so the file and the URL builder cannot drift apart |
 | `chat_ui_suite.mjs` | 43 | The same assistant through the browser: that the question stays on screen while the model thinks, that the answer renders as markdown, that the tool it used is named on screen and its result opens on demand, that a refused call looks different from one that worked and explains itself in English, that a follow-up question does not swallow the exchange before it, that the task list behind the page updates without a reload, that a model which falls over mid-turn leaves the question on screen to ask again from rather than losing the typing, that conversations survive a reload and can be deleted — and that with a password genuinely in the vault, neither it nor the account holding it reaches the page. Also that with no model configured the page says so and disables the box instead of failing on send |
 | `knowledge_ui_suite.mjs` | 110 | The same two pages in a browser: writing a runbook and getting it back as rendered markdown, finding it by words in any order, saying it still works, and — on Servers — storing a password without it appearing on screen or in the page source, revealing it deliberately, reading the access log that records both, opening an account in a desktop client (asserting the password really is on the clipboard and really is not in the downloaded .rdp), and grouping a multi-node estate by service so a DR node sits with its DC siblings. Also pastes a real PNG through a real ClipboardEvent and checks it becomes an attachment reference rather than a base64 blob in the row, and that every value on a server row copies on click while a web link stored in the IP field opens on double-click — with noopener, and never for a `javascript:` value |
@@ -48,6 +49,15 @@ started already knowing where it is — set these two and restart it first:
 WCC_LLM_BASE_URL=http://127.0.0.1:8765/v1 WCC_LLM_MODEL=fake-model   # on the API
 
 WCC_API=http://localhost:8000 python3 tests/chat_suite.py
+```
+
+The import suite needs the API to allow the forge it serves on port 8766, which
+means starting the API with that host listed:
+
+```bash
+WCC_FETCH_ALLOW=127.0.0.1   # on the API
+
+WCC_API=http://localhost:8000 python3 tests/import_suite.py
 ```
 
 **Browser suites** — need Playwright once:

@@ -183,11 +183,86 @@ check('the tool is gone', !(await p.locator('body').textContent()).includes(tool
 const orphans = await api('GET', `/api/attachments?entity_type=tool&entity_id=${tool.id}`);
 check('its files went with it', orphans.length === 0, `${orphans.length} left behind`);
 
+/* ═══════════════════════ importing a tool from a link ═══════════════════ */
+section('Building a tool from a repository link');
+
+// A one-file "repository", served from this process. The archive handling is
+// covered exhaustively in import_suite.py; what is being checked here is the
+// dialog - that a link becomes a working tool, and that a refusal is shown
+// where the person is looking rather than swallowed.
+const http = await import('node:http');
+const PAGE = '<!doctype html><title>Linked tool</title><h1>Imported</h1>';
+const forge = http.createServer((req, res) => {
+  if (req.url === '/acme/linked/raw/main/index.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(PAGE);
+  } else {
+    res.writeHead(404);
+    res.end('no');
+  }
+});
+await new Promise(r => forge.listen(8767, '127.0.0.1', r));
+
+const linkedName = `Linked Tool ${stamp()}`;
+await go('/tools');
+const importStatus = await api('GET', '/api/tools/import/status');
+
+await p.locator('#import-tool').click();
+await p.waitForTimeout(600);
+check('the Tools page offers an import without opening a file picker',
+  await D().count() === 1);
+
+if (importStatus.enabled) {
+  check('the dialog names the hosts it will fetch from',
+    (await D().textContent()).includes('and nowhere else'), await D().textContent());
+
+  // The refusal first, so it is checked on a live dialog rather than in theory.
+  await D().locator('#f-import-url').fill('https://evil.example.net/acme/thing');
+  await p.locator('#do-import').click();
+  await p.waitForTimeout(1200);
+  check('a host that is not allowed is refused, in the dialog',
+    await D().locator('[data-import-error]').count() === 1,
+    await D().textContent());
+  check('and the message says which setting decides it',
+    (await D().locator('[data-import-error]').textContent()).includes('WCC_FETCH_ALLOW'));
+
+  await D().locator('#f-import-url').fill('http://127.0.0.1:8767/acme/linked/raw/main/index.html');
+  await D().locator('#f-import-name').fill(linkedName);
+  await p.locator('#do-import').click();
+  await p.waitForTimeout(2500);
+
+  check('a good link imports', await D().locator('[data-import-done]').count() === 1,
+    await D().textContent());
+  const summary = await D().textContent();
+  check('and says what arrived rather than only "done"',
+    summary.includes('1 file imported') && summary.includes('index.html'), summary.slice(0, 200));
+
+  await p.locator('button:has-text("Done")').click();
+  await p.waitForTimeout(1200);
+  check('the imported tool appears without a page refresh',
+    (await p.locator('body').textContent()).includes(linkedName));
+
+  const made = (await api('GET', '/api/tools?limit=200')).find(x => x.name === linkedName);
+  check('it is runnable straight away, with no second step',
+    made && (await api('GET', `/api/tools/${made.id}/manifest`)).runnable === true,
+    JSON.stringify(made));
+  if (made) await api('DELETE', `/api/tools/${made.id}`);
+} else {
+  check('with importing switched off the dialog says so, not nothing',
+    await D().locator('[data-import-off]').count() === 1, await D().textContent());
+  check('and the box is disabled rather than pretending',
+    await D().locator('#f-import-url').isDisabled());
+  await p.keyboard.press('Escape');
+}
+forge.close();
+
 /* cleanup */
 await api('DELETE', `/api/tasks/${taskRow.id}`);
 
 section('Console health');
-const real = errors.filter(e => !/favicon|React DevTools|Failed to load resource.*40\d/i.test(e));
+// The 422 is this suite's own doing: it pastes a disallowed host on purpose.
+const real = errors.filter(e =>
+  !/favicon|React DevTools|Failed to load resource.*(40\d|422)/i.test(e));
 check('no uncaught console errors', real.length === 0, real.slice(0,3).join(' | '));
 
 console.log(`\n${'='.repeat(56)}\n  ${BD}${pass} passed, ${fail} failed${X}\n${'='.repeat(56)}`);

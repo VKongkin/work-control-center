@@ -169,6 +169,8 @@ interface BaseField {
   className?: string;
   name?: string;
   onBlur?: () => void;
+  /** Greyed out and not editable - e.g. while a request is in flight. */
+  disabled?: boolean;
 }
 
 const idFor = (name: string | undefined, label: string) =>
@@ -176,7 +178,7 @@ const idFor = (name: string | undefined, label: string) =>
 
 export function TextField({
   label, value, onChange, required, error, hint, placeholder, type = 'text',
-  className = '', name, onBlur,
+  className = '', name, onBlur, disabled,
 }: BaseField & {
   value: string;
   onChange: (v: string) => void;
@@ -193,6 +195,7 @@ export function TextField({
         type={type}
         value={value}
         placeholder={placeholder}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         aria-invalid={!!error}

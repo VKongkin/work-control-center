@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Plus, Play, Pencil, Trash2, Star, Wrench, FileWarning, Files,
+  Plus, Play, Pencil, Trash2, Star, Wrench, FileWarning, Files, Link2,
 } from 'lucide-react';
 import { toolApi, toolFiles } from '../api/client';
 import { Tool, ToolManifest } from '../types';
@@ -9,6 +9,7 @@ import { useResource, clean } from '../hooks/useResource';
 import { useForm } from '../hooks/useForm';
 import { useToast } from '../components/Toast';
 import Attachments, { formatBytes } from '../components/Attachments';
+import ImportFromLink from '../components/ImportFromLink';
 import {
   Button, ConfirmDialog, EmptyState, ErrorBanner, ErrorSummary, Modal,
   PageHeader, Spinner, TextAreaField, TextField,
@@ -31,6 +32,8 @@ export default function ToolsPage() {
   const [editing, setEditing] = useState<Tool | null>(null);
   const [managing, setManaging] = useState<Tool | null>(null);
   const [toDelete, setToDelete] = useState<Tool | null>(null);
+  // null closed; {tool: null} importing a new tool; {tool} refreshing one.
+  const [importing, setImporting] = useState<{ tool: Tool | null } | null>(null);
   const [manifests, setManifests] = useState<Record<number, ToolManifest>>({});
   const form = useForm({ initial: blank, rules: RULES });
 
@@ -105,9 +108,14 @@ export default function ToolsPage() {
         title="Tools"
         subtitle="Small web apps you have built, running in place"
         action={
-          <Button variant="primary" onClick={openNew}>
-            <Plus size={16} /> New Tool
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => setImporting({ tool: null })} id="import-tool">
+              <Link2 size={16} /> Import from link
+            </Button>
+            <Button variant="primary" onClick={openNew}>
+              <Plus size={16} /> New Tool
+            </Button>
+          </div>
         }
       />
 
@@ -118,11 +126,16 @@ export default function ToolsPage() {
       ) : items.length === 0 ? (
         <EmptyState
           title="No tools yet"
-          hint="Upload a folder containing index.html and its assets, and it runs here."
+          hint="Paste a repository link, or upload a folder containing index.html and its assets."
           action={
-            <Button variant="primary" onClick={openNew}>
-              <Plus size={16} /> New Tool
-            </Button>
+            <div className="flex justify-center gap-2">
+              <Button onClick={() => setImporting({ tool: null })}>
+                <Link2 size={16} /> Import from link
+              </Button>
+              <Button variant="primary" onClick={openNew}>
+                <Plus size={16} /> New Tool
+              </Button>
+            </div>
           }
         />
       ) : (
@@ -249,10 +262,21 @@ export default function ToolsPage() {
           </Button>
         }
       >
-        <p className="mb-4 text-sm text-slate-600">
-          Choose the folder containing <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">index.html</code>.
-          Its structure is preserved, so relative links to CSS, JS and images keep working.
-        </p>
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <p className="text-sm text-slate-600">
+            Choose the folder containing <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">index.html</code>.
+            Its structure is preserved, so relative links to CSS, JS and images keep working.
+          </p>
+          {managing && (
+            <Button
+              className="shrink-0"
+              id="refresh-from-link"
+              onClick={() => { const t = managing; setManaging(null); setImporting({ tool: t }); }}
+            >
+              <Link2 size={16} /> From a link
+            </Button>
+          )}
+        </div>
         {managing && (
           <Attachments
             entityType="tool"
@@ -262,6 +286,17 @@ export default function ToolsPage() {
           />
         )}
       </Modal>
+
+      <ImportFromLink
+        open={!!importing}
+        tool={importing?.tool ?? null}
+        onClose={() => setImporting(null)}
+        onImported={async () => {
+          await refresh();
+          const fresh = (await toolApi.getAll({ limit: 200 })).data as Tool[];
+          loadManifests(fresh);
+        }}
+      />
 
       <ConfirmDialog
         open={!!toDelete}

@@ -408,3 +408,26 @@ export interface VaultStatus {
   env_var: string;
   detail: string;
 }
+
+/** Importing a tool from a repository link. */
+export interface ImportStatus {
+  enabled: boolean;
+  hosts: string[];
+  token_set: boolean;
+  detail: string;
+  max_files: number;
+  max_bytes: number;
+}
+
+export interface ImportResult {
+  tool: { id: number; name: string; description?: string | null; entry_path?: string | null };
+  imported: number;
+  bytes: number;
+  entry_path: string | null;
+  runnable: boolean;
+  ref: string | null;
+  source_url: string;
+  /** Why files were left behind, and how many of each. */
+  skipped: Record<string, number>;
+  files: string[];
+}

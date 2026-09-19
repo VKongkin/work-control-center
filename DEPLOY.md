@@ -267,6 +267,9 @@ behaviour.
 | `WCC_VAULT_KEY` | unset | Encrypts server passwords on the Servers page. Unset means the inventory works normally but storing a password is refused — there is deliberately **no** fallback key in the database. See below. |
 | `WCC_AGENT_KEY` | unset | Turns on the Copilot/MCP agent interface and is the key it requires. Unset means every agent route returns 401. See `COPILOT.md`. |
 | `WCC_AGENT_EXPOSE_ACCOUNTS` | `0` | Set to `1` to let the agent's `list_servers` include account usernames. Never includes a password at any setting. |
+| `WCC_LLM_MODEL` | unset | The model behind the Assistant page. Unset means that page says so and does nothing. See `COPILOT.md`. |
+| `WCC_FETCH_ALLOW` | unset | Hosts the Tools page may import a tool from. Unset means importing from a link is off. See below. |
+| `WCC_FETCH_TOKEN` | unset | Read-only token for importing from a private repository. |
 
 ### About `WCC_VAULT_KEY`
 
@@ -284,6 +287,52 @@ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().
 Lose it and the stored passwords cannot be read back — which is the point. Every
 account also records where its credential of record lives, so losing the key
 costs you convenience rather than the credential.
+
+### About `WCC_FETCH_ALLOW`
+
+The Tools page can build a tool out of a GitHub or GitLab link rather than an
+uploaded folder. That is the only place WCC makes **the server** fetch a URL
+somebody typed, and it is worth being clear about why that is different from a
+browser doing it: the request comes from inside your network, from a host that
+can see things your laptop cannot — other servers, admin consoles, on a cloud
+box the metadata service that hands out credentials. Asked to fetch
+`http://169.254.169.254/...`, a naive implementation would do it and hand back
+the answer. That is server-side request forgery, and it is the ordinary way an
+internal application becomes a window onto everything around it.
+
+So the feature is off until you say where it may fetch from, and then it fetches
+from there and nowhere else:
+
+```bash
+# GitHub redirects archive downloads to codeload, so both are needed
+WCC_FETCH_ALLOW=github.com,codeload.github.com
+
+# Or the instance behind your own firewall - nothing leaves the building
+WCC_FETCH_ALLOW=gitlab.bank.local
+```
+
+Name the forges you actually use. The list is the whole of the protection, so a
+wildcard is the same as switching the protection off.
+
+Four things back it up, and each is covered by a test in `tests/import_suite.py`:
+
+- **Every redirect hop is re-checked**, not just the URL you pasted. An allowed
+  host answering `302 Location: http://169.254.169.254/` is the usual way a
+  check on the first URL alone gets walked around.
+- **A subdomain of an allowed host is allowed; a lookalike is not.**
+  `codeload.github.com` passes, `notgithub.com` and `github.com.evil.net` do not.
+- **`WCC_FETCH_TOKEN`, if set, is dropped the moment a redirect crosses to
+  another host.** A token issued for your GitLab does not travel to wherever it
+  points you.
+- **Archives are treated as hostile.** Entry paths are re-rooted, so a tar entry
+  named `../../../../etc/passwd` lands inside the tool rather than anywhere;
+  symlinks are skipped entirely; and the unpacked size is capped as it is read,
+  so an archive that is small on the wire and enormous when expanded is stopped
+  before it is written.
+
+Only web files are kept — HTML, CSS, JavaScript, images, fonts. The repository's
+CI config, lockfiles and `node_modules` are left behind, and the import says how
+many and why rather than dropping them silently.
 
 ## Updating
 
