@@ -265,13 +265,12 @@ section('A tool that remembers where it came from');
 
 if (importStatus.enabled) {
   // Two states of the same "repository", so a second pull is a real change.
-  let serveV2 = false;
+  let serveV2 = false, serveV3 = false;
   const repo = http.createServer((req, res) => {
     if (req.url === '/acme/versioned/raw/main/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(serveV2
-        ? '<!doctype html><title>Versioned</title><h1>two</h1>'
-        : '<!doctype html><title>Versioned</title><h1>one</h1>');
+      const word = serveV3 ? 'three' : serveV2 ? 'two' : 'one';
+      res.end(`<!doctype html><title>Versioned</title><h1>${word}</h1>`);
     } else { res.writeHead(404); res.end('no'); }
   });
   await new Promise(r => repo.listen(8769, '127.0.0.1', r));
@@ -338,6 +337,43 @@ if (importStatus.enabled) {
 
   const served = await (await fetch(B + `/api/tools/${vTool.id}/serve/index.html`)).text();
   check('the bytes really went back', served.includes('one') && !served.includes('two'), served);
+
+  // The reported bug: pulled to v2, still opened as v1, while downloading the
+  // same file gave v2. Opening it is the path that was never tested.
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(600);
+  serveV2 = true;
+  await api('POST', `/api/tools/${vTool.id}/pull`);
+  await go(`/tools/${vTool.id}`);
+  await p.waitForTimeout(1600);
+  const ran = p.frames().find(f => f.url().includes('/serve/'));
+  check('opening after a pull runs the version that was just pulled',
+    ran && (await ran.locator('h1').textContent()).includes('two'),
+    ran ? await ran.locator('h1').textContent() : '(no frame)');
+  check('and every file it asks for is under that version, not just the page',
+    /\/v\d+\/serve\//.test(ran.url()), ran.url());
+  check('the runner says which version is on screen',
+    (await p.locator('[data-running]').textContent()).includes('v'),
+    await p.locator('[data-running]').textContent());
+
+  // Pulling from a second tab while the runner sits open in the first. That
+  // used to leave the old version running with nothing to say so, which is
+  // indistinguishable from the tool being broken.
+  const runningLabel = await p.locator('[data-running]').textContent();
+  serveV3 = true;
+  await api('POST', `/api/tools/${vTool.id}/pull`);
+  // The page stays put; only the window regains focus, which is what returning
+  // to a tab does. The suite runs one page, so the event is dispatched rather
+  // than produced by switching tabs - the handler under test is the same one.
+  await p.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await p.waitForTimeout(2000);
+  check('coming back to an open runner picks up a pull made elsewhere',
+    (await p.locator('[data-running]').textContent()) !== runningLabel,
+    `still ${runningLabel}`);
+  const after = p.frames().find(f => f.url().includes('/serve/'));
+  check('and the frame is running the new files, not the old ones',
+    after && (await after.locator('h1').textContent()).includes('three'),
+    after ? await after.locator('h1').textContent() : '(no frame)');
 
   await p.keyboard.press('Escape');
   await p.waitForTimeout(700);

@@ -4,7 +4,7 @@ import type {
   Category, Tool, CalendarConnection, KnowledgeArticle, ServerAccount,
   SecretAccessEntry, VaultStatus, ConnectPlan, DocxImportResult,
   ChatStatus, ChatThread, ChatMessage, ChatTurn, ImportStatus, ImportResult,
-  ToolVersion, RestoreResult,
+  ToolVersion, RestoreResult, ToolManifest,
   Server as ServerRecord,
 } from '../types';
 
@@ -161,8 +161,20 @@ export const agentApi = {
 };
 
 export const toolFiles = {
-  manifest: (id: number) => client.get(`/tools/${id}/manifest`),
-  entryUrl: (id: number, entry: string) => `/api/tools/${id}/serve/${entry}`,
+  manifest: (id: number) => client.get<ToolManifest>(`/tools/${id}/manifest`),
+
+  /**
+   * Where the runner points the iframe.
+   *
+   * With a version, the number goes in the *path* rather than a query string,
+   * so the tool's own relative links resolve under it too: one URL change
+   * moves the whole folder, and a browser or proxy holding the old copy cannot
+   * serve it for the new address. Without one - a tool with no history yet -
+   * it falls back to the live path, which asks politely not to be cached.
+   */
+  entryUrl: (id: number, entry: string, version?: number | null) =>
+    version ? `/api/tools/${id}/v${version}/serve/${entry}`
+             : `/api/tools/${id}/serve/${entry}`,
 
   /** Whether importing from a link is switched on, and from which hosts. */
   importStatus: () => client.get<ImportStatus>('/tools/import/status'),

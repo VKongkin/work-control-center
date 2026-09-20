@@ -349,6 +349,46 @@ try:
     s, r = call("POST", f"/api/tools/{tid}/versions/999999/restore")
     check("a version id from another tool is refused", s == 404, f"{s}")
 
+    section("Opening the version the history says is current")
+
+    # The bug this covers: a tool pulled to v2 kept opening as v1 while
+    # downloading the same file gave v2. The bytes were always right; the stale
+    # copy was between them and the iframe. So the runner asks for a URL that
+    # names the version, and the whole folder moves when a pull happens.
+    s, man = call("GET", f"/api/tools/{tid}/manifest")
+    check("the manifest says which version is current",
+          man.get("version") == 3, str(man.get("version")))
+
+    v2_js = urllib.request.urlopen(
+        f"{B}/api/tools/{tid}/v2/serve/js/app.js", timeout=20)
+    body = v2_js.read()
+    check("a versioned URL serves that version's bytes",
+          b"dashboard v2" in body, body[:80])
+    check("and says it can be cached forever, because it cannot change",
+          "immutable" in (v2_js.headers.get("Cache-Control") or ""),
+          v2_js.headers.get("Cache-Control"))
+
+    # The heart of it: the same path at two versions gives two answers.
+    v1_js = urllib.request.urlopen(
+        f"{B}/api/tools/{tid}/v1/serve/js/app.js", timeout=20).read()
+    check("an older version still serves what it had",
+          b"dashboard v2" not in v1_js and b"dashboard" in v1_js, v1_js[:80])
+    check("so one path at two versions cannot be the same cache entry",
+          v1_js != body)
+
+    s, r = call("GET", f"/api/tools/{tid}/v99/serve/index.html")
+    check("a version that does not exist is a 404", s == 404, f"{s} {str(r)[:120]}")
+    s, r = call("GET", f"/api/tools/{tid}/v1/serve/js/extra.js")
+    check("and so is a file that version never had",
+          s == 404 and "version 1" in str(r), f"{s} {str(r)[:160]}")
+
+    live = urllib.request.urlopen(f"{B}/api/tools/{tid}/serve/js/app.js", timeout=20)
+    check("the unversioned path still works, for links made before this",
+          live.status == 200)
+    check("but it refuses to be cached, since its content moves",
+          "no-store" in (live.headers.get("Cache-Control") or ""),
+          live.headers.get("Cache-Control"))
+
     section("A tool with no link")
 
     s, plain = call("POST", "/api/tools", {"name": f"Hand made {RUN}"})

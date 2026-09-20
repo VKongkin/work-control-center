@@ -1,4 +1,5 @@
 """Tools: small web apps the user has built, uploaded and can run in place."""
+import json
 from datetime import datetime
 from typing import List, Optional
 
@@ -8,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Attachment, Tool, ToolVersion
+from app.models import Attachment, Tool, ToolBlob, ToolVersion
 from app.partial import make_partial, make_lenient, merge
 from app.services import repo_import, tool_versions
 from app.validation import Name
@@ -329,11 +330,16 @@ def manifest(tool_id: int, db: Session = Depends(get_db)):
         root_html = [p for p in html if "/" not in p]
         entry = (root_html or html or [None])[0]
 
+    # The version number the runner puts in its URL. It is what makes a pull
+    # visible to a browser that is holding an older copy.
+    latest = tool_versions.current(db, tool_id)
+
     return {
         "id": row.id,
         "name": row.name,
         "entry_path": entry,
         "runnable": entry is not None,
+        "version": latest.number if latest else None,
         "file_count": len(files),
         "total_bytes": sum(f.size for f in files),
         "files": [
@@ -341,6 +347,61 @@ def manifest(tool_id: int, db: Session = Depends(get_db)):
             for f in files
         ],
     }
+
+
+@router.get("/{tool_id}/v{number}/serve/{path:path}")
+def serve_version(tool_id: int, number: int, path: str, db: Session = Depends(get_db)):
+    """Serve one file *as a named version had it*.
+
+    This route exists because of a bug report: a tool pulled to v2 kept opening
+    as v1, while downloading the same file gave v2. The bytes in the database
+    were right, so the stale copy was somewhere between them and the iframe.
+
+    The unversioned route below asks every layer in that chain - the browser, a
+    corporate proxy, whatever nginx a bank puts in front - to believe
+    `Cache-Control: no-store` for a URL whose content changes underneath it.
+    That is a lot of trust placed in a promise, and when it is broken the
+    failure looks exactly like the one reported: right in a download, wrong in
+    the frame.
+
+    So the runner asks for this instead. The version is in the path rather than
+    a query string, which means the tool's own relative links - `css/app.css`,
+    `js/app.js` - resolve under it too, and a pull moves the whole folder to a
+    new address in one step without touching the tool's markup. And because
+    what a version contains cannot change, this really is immutable and can say
+    so, rather than asking to be re-fetched forever.
+    """
+    version = (
+        db.query(ToolVersion)
+        .filter(ToolVersion.tool_id == tool_id, ToolVersion.number == number)
+        .first()
+    )
+    if not version:
+        raise HTTPException(
+            status_code=404, detail=f"This tool has no version {number}")
+
+    entry = next((m for m in json.loads(version.manifest) if m["path"] == path), None)
+    if not entry:
+        raise HTTPException(
+            status_code=404, detail=f"{path} was not part of version {number}")
+
+    blob = db.query(ToolBlob).filter(ToolBlob.sha256 == entry["sha256"]).first()
+    if not blob:
+        raise HTTPException(
+            status_code=410,
+            detail=f"The contents of version {number} are no longer stored.")
+
+    from app.api.attachments import guess_type
+
+    return Response(
+        content=blob.data,
+        media_type=guess_type(path, None),
+        headers={
+            # Safe to say, and true: this URL names one immutable snapshot.
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/{tool_id}/serve/{path:path}")

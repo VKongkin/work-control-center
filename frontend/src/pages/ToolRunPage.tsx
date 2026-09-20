@@ -53,6 +53,34 @@ export default function ToolRunPage() {
     return () => document.removeEventListener('keydown', onKey);
   }, [full]);
 
+  /**
+   * Notice a pull that happened somewhere else.
+   *
+   * Leaving this page open in one tab and pulling in another used to leave the
+   * old version running with nothing to say so - and "I pulled it, it is still
+   * the old one" is indistinguishable from a bug. Coming back to the tab
+   * re-asks for the manifest; a new version number swaps the frame's URL, so
+   * it reloads on its own.
+   */
+  useEffect(() => {
+    const recheck = async () => {
+      if (document.hidden) return;
+      try {
+        const { data } = await toolFiles.manifest(toolId);
+        setManifest((prev) => (prev && prev.version === data.version ? prev : data));
+      } catch {
+        // Offline or mid-restart: the page on screen is still the last good
+        // answer, and replacing it with an error would be worse.
+      }
+    };
+    window.addEventListener('focus', recheck);
+    document.addEventListener('visibilitychange', recheck);
+    return () => {
+      window.removeEventListener('focus', recheck);
+      document.removeEventListener('visibilitychange', recheck);
+    };
+  }, [toolId]);
+
   if (loading) return <Spinner label="Loading tool…" />;
   if (error) return <ErrorBanner message={error} onRetry={load} />;
   if (!tool) return null;
@@ -72,11 +100,15 @@ export default function ToolRunPage() {
     );
   }
 
-  const src = `${toolFiles.entryUrl(tool.id, manifest.entry_path)}?v=${nonce}`;
+  // The version is in the path, so the tool's own relative links to CSS and
+  // JavaScript resolve under it too. The old `?v=0` was a cache-buster that
+  // never changed and only covered the entry page, which is how a pulled tool
+  // could keep opening as the version before it.
+  const src = toolFiles.entryUrl(tool.id, manifest.entry_path, manifest.version);
 
   const frame = (
     <iframe
-      key={nonce}
+      key={`${manifest.version ?? 0}-${nonce}`}
       src={src}
       title={tool.name}
       sandbox={SANDBOX}
@@ -113,7 +145,7 @@ export default function ToolRunPage() {
           <Button onClick={() => setNonce((n) => n + 1)}><RefreshCw size={14} /> Reload</Button>
           <Button onClick={() => setFull(true)}><Maximize2 size={14} /> Full screen</Button>
           <a
-            href={toolFiles.entryUrl(tool.id, manifest.entry_path)}
+            href={toolFiles.entryUrl(tool.id, manifest.entry_path, manifest.version)}
             target="_blank"
             rel="noreferrer noopener"
             className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-white px-3.5 py-2 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50"
@@ -129,8 +161,9 @@ export default function ToolRunPage() {
           <p className="text-xs text-slate-500">
             Sandboxed — this tool runs isolated and cannot read or change your work data.
           </p>
-          <span className="ml-auto truncate font-mono text-xs text-slate-400">
+          <span className="ml-auto truncate font-mono text-xs text-slate-400" data-running>
             {manifest.entry_path}
+            {manifest.version ? ` · v${manifest.version}` : ''}
           </span>
         </div>
         <div className="h-[calc(100vh-19rem)] min-h-[420px]">{frame}</div>

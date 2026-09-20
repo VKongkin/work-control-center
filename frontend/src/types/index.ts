@@ -263,6 +263,8 @@ export interface Tool {
 export interface ToolManifest {
   id: number;
   name: string;
+  /** The version the runner addresses. Null only for a tool with no files. */
+  version?: number | null;
   entry_path: string | null;
   runnable: boolean;
   file_count: number;

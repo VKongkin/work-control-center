@@ -19,7 +19,7 @@ services:
       # business answering the network. Set DB_BIND=0.0.0.0 if you genuinely
       # need to reach it from another machine - and change POSTGRES_PASSWORD
       # first if you do.
-      - "${DB_BIND:-127.0.0.1}:${DB_PORT:-5432}:5432"
+      - "${DB_BIND:-127.0.0.1}:${DB_PORT:-5433}:5433"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

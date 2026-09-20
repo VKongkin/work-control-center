@@ -348,6 +348,17 @@ Restoring is recorded as a version of its own rather than deleting what came
 after. The question that follows a rollback is always "what was I running when it
 broke", and a history that quietly loses that is worse than not having one.
 
+A running tool is addressed by version — `/api/tools/{id}/v{n}/serve/index.html`.
+The number is in the path rather than a query string, so the tool's own relative
+links to CSS and JavaScript resolve under it as well: a pull moves the whole
+folder to a new address in one step. That matters because the alternative is
+asking every layer between the database and the iframe — the browser, a
+corporate proxy, whatever sits in front of WCC — to honour `Cache-Control:
+no-store` on a URL whose content changes underneath it. When one of them does
+not, the tool opens as the version before the last pull while downloading the
+same file gives the new one. A versioned URL cannot fail that way, and because a
+version's contents genuinely cannot change it is served as immutable.
+
 Storage is content-addressed: a file's bytes are kept once under their SHA-256 and
 shared by every version containing them. A tool pulled twenty times with one line
 changed costs one line, not twenty copies — which is what makes keeping every
