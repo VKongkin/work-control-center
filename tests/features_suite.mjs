@@ -115,7 +115,12 @@ await D().locator('#f-name').fill(toolName);
 await D().locator('#f-description').fill('A probe');
 await p.locator('button:has-text("Create tool")').click();
 await p.waitForTimeout(2000);
-check('after creating, it asks for files', (await D().textContent() ?? '').includes('Files'));
+// The dialog is titled with the tool's name now and carries Files/History
+// tabs, so "it asked for files" means the Files tab is what opened.
+check('after creating, it opens on files rather than making you find them',
+  (await D().textContent() ?? '').includes(toolName)
+  && await D().locator('[data-tab="files"]').count() === 1,
+  await D().textContent());
 check('a tool is offered folder upload', (await D().locator('button:has-text("Choose folder")').count()) === 1);
 
 await D().locator('input[type=file]').first().setInputFiles([
@@ -254,6 +259,118 @@ if (importStatus.enabled) {
     await D().locator('#f-import-url').isDisabled());
   await p.keyboard.press('Escape');
 }
+
+/* ══════════════════ pulling, picking an entry, and history ═════════════ */
+section('A tool that remembers where it came from');
+
+if (importStatus.enabled) {
+  // Two states of the same "repository", so a second pull is a real change.
+  let serveV2 = false;
+  const repo = http.createServer((req, res) => {
+    if (req.url === '/acme/versioned/raw/main/index.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(serveV2
+        ? '<!doctype html><title>Versioned</title><h1>two</h1>'
+        : '<!doctype html><title>Versioned</title><h1>one</h1>');
+    } else { res.writeHead(404); res.end('no'); }
+  });
+  await new Promise(r => repo.listen(8769, '127.0.0.1', r));
+
+  const vName = `Versioned Tool ${stamp()}`;
+  const link = 'http://127.0.0.1:8769/acme/versioned/raw/main/index.html';
+  await go('/tools');
+  await p.locator('#import-tool').click();
+  await p.waitForTimeout(600);
+  await D().locator('#f-import-url').fill(link);
+  await D().locator('#f-import-name').fill(vName);
+  await p.locator('#do-import').click();
+  await p.waitForTimeout(2500);
+  await p.locator('button:has-text("Done")').click();
+  await p.waitForTimeout(1200);
+
+  const vTool = (await api('GET', '/api/tools?limit=200')).find(x => x.name === vName);
+  check('the tool stores the link it came from', vTool?.source_url === link,
+    JSON.stringify(vTool?.source_url));
+
+  const card = p.locator('div', { hasText: vName });
+  check('and the card shows it, so you can see what it tracks',
+    (await p.locator('body').textContent()).includes('/acme/versioned/'));
+  check('a Pull button appears for a tool with a link',
+    await p.locator(`[data-pull="${vTool.id}"]`).count() === 1);
+
+  // Pull with nothing changed: honest about it rather than inventing a version.
+  await p.locator(`[data-pull="${vTool.id}"]`).click();
+  await p.waitForTimeout(2200);
+  check('pulling an unchanged tool says so rather than claiming an update',
+    (await p.locator('body').textContent()).includes('already up to date'),
+    await p.locator('body').textContent());
+
+  serveV2 = true;
+  await p.locator(`[data-pull="${vTool.id}"]`).click();
+  await p.waitForTimeout(2500);
+  check('pulling a changed tool reports what moved',
+    /1 file changed/.test(await p.locator('body').textContent()),
+    (await p.locator('body').textContent()).slice(0, 200));
+
+  // History, and going back.
+  await go('/tools');
+  await p.locator(`[data-pull="${vTool.id}"]`).locator('xpath=preceding-sibling::button[1]').click();
+  await p.waitForTimeout(900);
+  await D().locator('[data-tab="history"]').click();
+  await p.waitForTimeout(900);
+  check('the history lists a version per change',
+    await D().locator('[data-version]').count() === 2,
+    String(await D().locator('[data-version]').count()));
+  check('the newest is marked current',
+    (await D().locator('[data-version="2"]').textContent()).includes('current'));
+  check('and each version says how it came about',
+    (await D().locator('[data-version="2"]').textContent()).includes('Pulled'));
+
+  await D().locator('[data-restore="1"]').click();
+  await p.waitForTimeout(700);
+  await p.locator('[role="dialog"] button:has-text("Restore")').last().click();
+  await p.waitForTimeout(1800);
+  check('restoring puts the old files back',
+    await D().locator('[data-version="3"]').count() === 1,
+    await D().textContent());
+  check('and records the rollback as its own version, losing nothing',
+    (await D().locator('[data-version="3"]').textContent()).includes('Restored'));
+
+  const served = await (await fetch(B + `/api/tools/${vTool.id}/serve/index.html`)).text();
+  check('the bytes really went back', served.includes('one') && !served.includes('two'), served);
+
+  await p.keyboard.press('Escape');
+  await p.waitForTimeout(700);
+  await api('DELETE', `/api/tools/${vTool.id}`);
+  repo.close();
+} else {
+  check('version history needs importing switched on (skipped)', true);
+}
+
+section('Choosing the entry file from the files that exist');
+
+const pickName = `Entry Pick ${stamp()}`;
+const made = await api('POST', '/api/tools', { name: pickName });
+await api('POST', '/api/tools/import', {
+  url: 'http://127.0.0.1:8767/acme/linked/raw/main/index.html',
+  tool_id: made.id,
+}).catch(() => null);
+await go('/tools');
+await p.locator(`button[aria-label="Edit ${pickName}"]`).click();
+await p.waitForTimeout(700);
+const entry = D().locator('#f-entry_path');
+check('the entry file is a picker rather than a free-text box',
+  (await entry.evaluate(el => el.tagName)).toLowerCase() === 'select',
+  await entry.evaluate(el => el.tagName));
+const opts = await entry.locator('option').allTextContents();
+check('and it offers the pages the tool actually has',
+  opts.some(o => o.includes('index.html')), JSON.stringify(opts));
+check('while a stylesheet is not offered as something to open',
+  !opts.some(o => o.endsWith('.css')), JSON.stringify(opts));
+await p.keyboard.press('Escape');
+await p.waitForTimeout(600);
+await api('DELETE', `/api/tools/${made.id}`);
+
 forge.close();
 
 /* cleanup */

@@ -4,6 +4,7 @@ import type {
   Category, Tool, CalendarConnection, KnowledgeArticle, ServerAccount,
   SecretAccessEntry, VaultStatus, ConnectPlan, DocxImportResult,
   ChatStatus, ChatThread, ChatMessage, ChatTurn, ImportStatus, ImportResult,
+  ToolVersion, RestoreResult,
   Server as ServerRecord,
 } from '../types';
 
@@ -141,9 +142,16 @@ export const serverApi = {
     client.put<ServerAccount>(`/servers/accounts/${id}/secret`, { secret }),
   connect: (id: number, method: 'rdp' | 'sftp' | 'ssh') =>
     client.post<ConnectPlan>(`/servers/accounts/${id}/connect`, null, { params: { method } }),
-  reveal: (id: number, reason?: string) =>
+  /**
+   * The plaintext. `toClipboard` does not change what the server does - the
+   * password leaves either way - only what the access log records, because a
+   * password on screen and one that went straight to the clipboard are
+   * genuinely different events for whoever reads that log later.
+   */
+  reveal: (id: number, reason?: string, toClipboard = false) =>
     client.post<{ username: string; secret: string }>(
-      `/servers/accounts/${id}/reveal`, null, { params: { reason } }),
+      `/servers/accounts/${id}/reveal`, null,
+      { params: { reason, to_clipboard: toClipboard || undefined } }),
   accessLog: (id: number) =>
     client.get<SecretAccessEntry[]>(`/servers/accounts/${id}/access-log`),
 };
@@ -166,6 +174,14 @@ export const toolFiles = {
    */
   importLink: (body: { url: string; name?: string; tool_id?: number }) =>
     client.post<ImportResult>('/tools/import', body, { timeout: 120000 }),
+
+  /** Fetch the stored link again. Never automatic - see the endpoint. */
+  pull: (id: number) =>
+    client.post<ImportResult>(`/tools/${id}/pull`, null, { timeout: 120000 }),
+
+  versions: (id: number) => client.get<ToolVersion[]>(`/tools/${id}/versions`),
+  restore: (id: number, versionId: number) =>
+    client.post<RestoreResult>(`/tools/${id}/versions/${versionId}/restore`),
 };
 
 export const dashboardApi = {

@@ -36,6 +36,18 @@ DASHBOARD: List[Tuple[str, bytes]] = [
     ("src/main.py", b"print('not part of a web page')\n"),
 ]
 
+# A second state of the dashboard, for pulling twice: one file edited, one
+# added, one gone. That is what a version history has to be able to describe.
+DASHBOARD_V2: List[Tuple[str, bytes]] = [
+    ("index.html", b"<!doctype html><title>Dashboard</title><link rel=stylesheet "
+                   b"href=css/app.css><script src=js/app.js></script><h1>MQ v2</h1>"),
+    ("css/app.css", b"body{font-family:system-ui}"),      # unchanged
+    ("js/app.js", b"console.log('dashboard v2');"),        # changed
+    ("js/extra.js", b"console.log('new in v2');"),         # added
+    ("README.md", b"# Dashboard\n"),                       # unchanged
+    # widget/index.html is gone
+]
+
 LEGACY: List[Tuple[str, bytes]] = [
     ("index.html", b"<!doctype html><title>Legacy</title>"),
 ]
@@ -105,6 +117,10 @@ class FakeForge:
         self.port = 0
         self.seen: List[str] = []
         self.auth_seen: List[Optional[str]] = []
+        # Flip to serve the second state of the dashboard, so pulling the same
+        # link twice produces a genuine change rather than a rebuilt identical
+        # archive.
+        self.moved_on = False
 
     # ------------------------------------------------------------------ routes
 
@@ -113,7 +129,8 @@ class FakeForge:
         base = f"http://127.0.0.1:{self.port}"
         return {
             "/acme/dashboard/archive/main.tar.gz":
-                (200, tar_gz("dashboard-main", DASHBOARD), gz),
+                (200, tar_gz("dashboard-main",
+                             DASHBOARD_V2 if self.moved_on else DASHBOARD), gz),
             "/acme/dashboard/-/archive/main/dashboard-main.zip":
                 (200, zip_of("dashboard-main", DASHBOARD),
                  {"Content-Type": "application/zip"}),

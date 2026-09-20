@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  AlertTriangle, ChevronRight, Copy, Eye, EyeOff, FolderSync, History, KeyRound,
+  AlertTriangle, ChevronRight, ClipboardCopy, Copy, Eye, EyeOff, FolderSync,
+  History, KeyRound,
   Monitor, Pencil, Plus, Search, Server as ServerIcon, Terminal, Trash2, X,
 } from 'lucide-react';
 import { serverApi, apiError } from '../api/client';
@@ -763,6 +764,35 @@ function AccountRow({
     }
   }
 
+  /**
+   * Straight to the clipboard, without ever drawing it.
+   *
+   * Revealing first was one step too many for the common case, which is
+   * pasting into a login box - and worse, it put the password on screen for
+   * no reason. Nothing is hidden from the audit log by this: the server
+   * records it as a COPY, which is its own kind of access and reads as such
+   * later. If the clipboard is unavailable the password is shown instead,
+   * because silently copying nothing is the one outcome that would send
+   * someone to a failed login wondering why.
+   */
+  async function copyPassword() {
+    setBusy(true);
+    try {
+      const { data } = await serverApi.reveal(
+        account.id, 'copied to clipboard from Servers', true);
+      if (await copyText(data.secret)) {
+        toast.success(`Password for ${account.username} copied`);
+      } else {
+        setPasteMe(data.secret);
+        toast.error('The clipboard is blocked here, so the password is shown below.');
+      }
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function save() {
     setBusy(true);
     try {
@@ -803,15 +833,28 @@ function AccountRow({
 
         <div className="ml-auto flex items-center gap-1">
           {account.has_secret ? (
-            <Button
-              onClick={() => (revealed ? setRevealed(null) : reveal())}
-              disabled={busy || !account.secret_readable}
-              title={account.secret_readable ? undefined : 'The vault key has changed or is missing'}
-              className="!py-1 !text-xs"
-            >
-              {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
-              {revealed ? 'Hide' : 'Reveal'}
-            </Button>
+            <>
+              <Button
+                onClick={copyPassword}
+                disabled={busy || !account.secret_readable}
+                title={account.secret_readable
+                  ? 'Copy to the clipboard without showing it'
+                  : 'The vault key has changed or is missing'}
+                className="!py-1 !text-xs"
+                data-copy-password={account.username}
+              >
+                <ClipboardCopy size={13} /> Copy
+              </Button>
+              <Button
+                onClick={() => (revealed ? setRevealed(null) : reveal())}
+                disabled={busy || !account.secret_readable}
+                title={account.secret_readable ? undefined : 'The vault key has changed or is missing'}
+                className="!py-1 !text-xs"
+              >
+                {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
+                {revealed ? 'Hide' : 'Reveal'}
+              </Button>
+            </>
           ) : (
             <span className="text-xs text-slate-400">no password stored</span>
           )}

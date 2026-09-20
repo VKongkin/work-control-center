@@ -2,17 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus, Play, Pencil, Trash2, Star, Wrench, FileWarning, Files, Link2,
+  RefreshCw, History,
 } from 'lucide-react';
-import { toolApi, toolFiles } from '../api/client';
+import { toolApi, toolFiles, apiError } from '../api/client';
 import { Tool, ToolManifest } from '../types';
 import { useResource, clean } from '../hooks/useResource';
 import { useForm } from '../hooks/useForm';
 import { useToast } from '../components/Toast';
 import Attachments, { formatBytes } from '../components/Attachments';
 import ImportFromLink from '../components/ImportFromLink';
+import ToolHistory from '../components/ToolHistory';
 import {
   Button, ConfirmDialog, EmptyState, ErrorBanner, ErrorSummary, Modal,
-  PageHeader, Spinner, TextAreaField, TextField,
+  PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from '../components/ui';
 import { maxLength, required } from '../lib/validators';
 
@@ -34,6 +36,8 @@ export default function ToolsPage() {
   const [toDelete, setToDelete] = useState<Tool | null>(null);
   // null closed; {tool: null} importing a new tool; {tool} refreshing one.
   const [importing, setImporting] = useState<{ tool: Tool | null } | null>(null);
+  const [tab, setTab] = useState<'files' | 'history'>('files');
+  const [pulling, setPulling] = useState<number | null>(null);
   const [manifests, setManifests] = useState<Record<number, ToolManifest>>({});
   const form = useForm({ initial: blank, rules: RULES });
 
@@ -60,6 +64,24 @@ export default function ToolsPage() {
     form.reset(blank);
     setOpen(true);
   }
+
+  /**
+   * The HTML files this tool actually has. Anything else cannot be an entry
+   * point - the runner opens it in an iframe, and pointing that at a
+   * stylesheet is a blank page and a confused half hour.
+   */
+  const entryOptions = useMemo(() => {
+    const m = editing ? manifests[editing.id] : null;
+    const paths = (m?.files ?? [])
+      .map((f) => f.path)
+      .filter((p) => /\.(html?|htm)$/i.test(p))
+      .sort();
+    // Keep whatever is currently recorded even if the file has gone, so
+    // opening the form does not silently change the entry point.
+    const current = editing?.entry_path;
+    if (current && !paths.includes(current)) paths.unshift(current);
+    return paths.map((p) => ({ value: p, label: p }));
+  }, [editing, manifests]);
 
   function openEdit(t: Tool) {
     setEditing(t);
@@ -88,6 +110,30 @@ export default function ToolsPage() {
         if (made) setManaging(made);
       }
     } else if (typeof result === 'string') form.setServerError(result);
+  }
+
+  /**
+   * Fetch the stored link again. Only ever on a click: a tool that re-pulled
+   * itself would change under you mid-incident, which is the worst possible
+   * moment for the page in front of you to become a different page.
+   */
+  async function pull(t: Tool) {
+    setPulling(t.id);
+    try {
+      const { data } = await toolFiles.pull(t.id);
+      const d = data.changes;
+      const moved = d ? d.added.length + d.changed.length + d.removed.length : 0;
+      toast.success(moved
+        ? `${t.name} updated — ${moved} file${moved === 1 ? '' : 's'} changed, now v${data.version}`
+        : `${t.name} is already up to date`);
+      await refresh();
+      const fresh = (await toolApi.getAll({ limit: 200 })).data as Tool[];
+      loadManifests(fresh);
+    } catch (err) {
+      toast.error(apiError(err));
+    } finally {
+      setPulling(null);
+    }
   }
 
   async function togglePin(t: Tool) {
@@ -175,6 +221,18 @@ export default function ToolsPage() {
                   <p className="mt-3 line-clamp-2 text-sm text-slate-600">{t.description}</p>
                 )}
 
+                {t.source_url && (
+                  <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400">
+                    <Link2 size={11} className="shrink-0" />
+                    <span className="truncate" title={t.source_url}>{t.source_url}</span>
+                    {t.source_ref && (
+                      <span className="shrink-0 rounded bg-slate-100 px-1 font-mono text-slate-500">
+                        {t.source_ref}
+                      </span>
+                    )}
+                  </p>
+                )}
+
                 {m && !runnable && (
                   <p className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
                     <FileWarning size={14} className="mt-px shrink-0" />
@@ -191,13 +249,26 @@ export default function ToolsPage() {
                       <Play size={14} /> Open
                     </Link>
                   ) : (
-                    <Button variant="primary" onClick={() => setManaging(t)}>
+                    <Button variant="primary" onClick={() => { setTab('files'); setManaging(t); }}>
                       <Files size={14} /> Add files
                     </Button>
                   )}
-                  <Button onClick={() => setManaging(t)} aria-label={`Files of ${t.name}`}>
+                  <Button onClick={() => { setTab('files'); setManaging(t); }}
+                    aria-label={`Files of ${t.name}`}>
                     <Files size={14} /> Files
                   </Button>
+                  {t.source_url && (
+                    <Button
+                      onClick={() => pull(t)}
+                      disabled={pulling === t.id}
+                      aria-label={`Pull ${t.name}`}
+                      data-pull={t.id}
+                      title={`Fetch ${t.source_url} again`}
+                    >
+                      <RefreshCw size={14} className={pulling === t.id ? 'animate-spin' : ''} />
+                      {pulling === t.id ? 'Pulling…' : 'Pull'}
+                    </Button>
+                  )}
                   <Button variant="ghost" onClick={() => openEdit(t)} aria-label={`Edit ${t.name}`}>
                     <Pencil size={15} />
                   </Button>
@@ -239,11 +310,32 @@ export default function ToolsPage() {
             {...fx('description')} label="Description" value={form.values.description}
             onChange={set('description')} placeholder="What it does, and when you reach for it"
           />
-          <TextField
-            {...fx('entry_path')} label="Entry file" value={form.values.entry_path}
-            onChange={set('entry_path')}
-            hint="Which file opens when the tool runs. Usually index.html."
-          />
+          {/* A picker, not a text box. Typing this by hand meant a typo
+              produced a tool that would not run and said nothing about why,
+              and there is no reason to allow naming a file that is not
+              there. Before any files exist there is nothing to pick from, so
+              it falls back to the box. */}
+          {editing && entryOptions.length > 0 ? (
+            <SelectField
+              {...fx('entry_path')}
+              label="Entry file"
+              value={form.values.entry_path}
+              onChange={set('entry_path')}
+              options={entryOptions}
+              placeholder="— pick the page that opens —"
+              hint={entryOptions.length === 1
+                ? 'The only page in this tool.'
+                : `${entryOptions.length} pages in this tool. Usually index.html.`}
+            />
+          ) : (
+            <TextField
+              {...fx('entry_path')} label="Entry file" value={form.values.entry_path}
+              onChange={set('entry_path')}
+              hint={editing
+                ? 'No files uploaded yet, so there is nothing to choose from.'
+                : 'Which file opens when the tool runs. Usually index.html.'}
+            />
+          )}
         </div>
       </Modal>
 
@@ -251,7 +343,7 @@ export default function ToolsPage() {
       <Modal
         open={!!managing}
         wide
-        title={managing ? `Files — ${managing.name}` : 'Files'}
+        title={managing ? `${managing.name}` : 'Files'}
         onClose={() => { setManaging(null); if (items.length) loadManifests(items); }}
         footer={
           <Button
@@ -262,28 +354,67 @@ export default function ToolsPage() {
           </Button>
         }
       >
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <p className="text-sm text-slate-600">
-            Choose the folder containing <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">index.html</code>.
-            Its structure is preserved, so relative links to CSS, JS and images keep working.
-          </p>
-          {managing && (
-            <Button
-              className="shrink-0"
-              id="refresh-from-link"
-              onClick={() => { const t = managing; setManaging(null); setImporting({ tool: t }); }}
+        <div className="mb-4 flex items-center gap-1 border-b border-slate-200">
+          {(['files', 'history'] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              data-tab={k}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium capitalize transition-colors ${
+                tab === k
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
             >
-              <Link2 size={16} /> From a link
-            </Button>
+              {k === 'history' ? <History size={14} className="mr-1 inline" /> : null}
+              {k}
+            </button>
+          ))}
+          {managing && (
+            <div className="ml-auto flex gap-2 pb-1.5">
+              {managing.source_url && (
+                <Button
+                  className="!py-1 !text-xs"
+                  disabled={pulling === managing.id}
+                  onClick={() => pull(managing)}
+                >
+                  <RefreshCw size={13} className={pulling === managing.id ? 'animate-spin' : ''} />
+                  Pull
+                </Button>
+              )}
+              <Button
+                className="!py-1 !text-xs"
+                id="refresh-from-link"
+                onClick={() => { const x = managing; setManaging(null); setImporting({ tool: x }); }}
+              >
+                <Link2 size={13} /> {managing.source_url ? 'Change link' : 'From a link'}
+              </Button>
+            </div>
           )}
         </div>
-        {managing && (
-          <Attachments
-            entityType="tool"
-            entityId={managing.id}
-            allowFolder
-            onChange={() => { if (items.length) loadManifests(items); }}
-          />
+
+        {tab === 'files' ? (
+          <>
+            <p className="mb-4 text-sm text-slate-600">
+              Choose the folder containing <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">index.html</code>.
+              Its structure is preserved, so relative links to CSS, JS and images keep working.
+            </p>
+            {managing && (
+              <Attachments
+                entityType="tool"
+                entityId={managing.id}
+                allowFolder
+                onChange={() => { if (items.length) loadManifests(items); }}
+              />
+            )}
+          </>
+        ) : (
+          managing && (
+            <ToolHistory
+              tool={managing}
+              onChanged={() => { if (items.length) loadManifests(items); refresh(); }}
+            />
+          )
         )}
       </Modal>
 

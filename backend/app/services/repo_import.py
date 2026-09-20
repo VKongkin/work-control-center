@@ -89,6 +89,12 @@ class Imported:
     name: str
     ref: Optional[str]
     source_url: str
+    # The link as it was pasted. This is what gets stored for pulling again,
+    # not the archive URL it resolved to: a bare repository link re-resolves
+    # next time, so a branch that has moved on is still followed and a project
+    # that switches from master to main keeps working.
+    link: str = ""
+    subdir: str = ""
     files: List[Tuple[str, bytes]] = field(default_factory=list)
     skipped: Dict[str, int] = field(default_factory=dict)
 
@@ -365,7 +371,8 @@ def _clean(raw: str) -> str:
 
 
 def unpack(blob: bytes, source: Source) -> Imported:
-    out = Imported(name=source.name, ref=source.ref, source_url=source.url)
+    out = Imported(name=source.name, ref=source.ref, source_url=source.url,
+                   subdir=source.subdir)
 
     if source.kind == "file":
         path = _clean(_name_from_path(urlparse(source.url).path))
@@ -487,5 +494,7 @@ def import_link(link: str) -> Imported:
             last = e
             continue                       # e.g. main missing, try master
         source.url = final_url
-        return unpack(blob, source)
+        result = unpack(blob, source)
+        result.link = pasted
+        return result
     raise last or ImportRefused("Nothing could be fetched from that link.")

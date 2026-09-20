@@ -265,6 +265,119 @@ try:
     s, out = imported(f"{base}/acme/dashboard", tool_id=999999)
     check("importing into a tool that does not exist is a 404", s == 404, f"{s}")
 
+    section("Remembering where it came from")
+
+    s, out = imported(f"{base}/acme/dashboard", name=f"Pullable {RUN}")
+    tid = out["tool"]["id"]
+    made_tools.append(tid)
+    check("the tool records the link it was built from",
+          out["tool"]["source_url"] == f"{base}/acme/dashboard",
+          str(out["tool"].get("source_url")))
+    check("and the branch that answered",
+          out["tool"]["source_ref"] == "main", str(out["tool"].get("source_ref")))
+    check("the link stored is the one that was pasted, not the archive URL",
+          ".tar.gz" not in (out["tool"]["source_url"] or ""),
+          out["tool"]["source_url"])
+
+    s, first = call("GET", f"/api/tools/{tid}/versions")
+    check("the import left a version behind", s == 200 and len(first) == 1,
+          f"{s} {len(first or [])}")
+    check("numbered from one", first[0]["number"] == 1, str(first[0]))
+    check("and recorded as an import rather than an upload",
+          first[0]["origin"] == "import", first[0]["origin"])
+    check("its first version counts everything as added",
+          len(first[0]["changes"]["added"]) == 5 and not first[0]["changes"]["removed"],
+          str(first[0]["changes"]))
+
+    section("Pulling again")
+
+    s, same = call("POST", f"/api/tools/{tid}/pull")
+    check("pulling with nothing changed upstream succeeds", s == 200, f"{s} {str(same)[:160]}")
+    s, after = call("GET", f"/api/tools/{tid}/versions")
+    check("but does not invent a version when nothing moved",
+          len(after) == 1, f"{len(after)} versions")
+
+    forge.moved_on = True
+    s, moved = call("POST", f"/api/tools/{tid}/pull")
+    check("pulling after a real change succeeds", s == 200, f"{s} {str(moved)[:160]}")
+    check("and says which version it made", moved.get("version") == 2, str(moved.get("version")))
+
+    d = moved["changes"]
+    # Both the page and its script were edited upstream; the stylesheet and the
+    # README were not, and must not be reported as changed.
+    check("it reports exactly the files that were edited",
+          d["changed"] == ["index.html", "js/app.js"], str(d))
+    check("the file that appeared", d["added"] == ["js/extra.js"], str(d))
+    check("and the one that went away", d["removed"] == ["widget/index.html"], str(d))
+
+    s, man = call("GET", f"/api/tools/{tid}/manifest")
+    check("the tool really is the new version now",
+          any(f["path"] == "js/extra.js" for f in man["files"])
+          and not any(f["path"] == "widget/index.html" for f in man["files"]),
+          str([f["path"] for f in man["files"]]))
+
+    section("Going back")
+
+    s, versions_now = call("GET", f"/api/tools/{tid}/versions")
+    v1 = [v for v in versions_now if v["number"] == 1][0]
+    check("the older version is still listed", v1["file_count"] == 5, str(v1))
+    check("and the newest is marked as current",
+          versions_now[0]["current"] is True and versions_now[0]["number"] == 2,
+          str(versions_now[0]))
+
+    s, back = call("POST", f"/api/tools/{tid}/versions/{v1['id']}/restore")
+    check("a version can be restored", s == 200, f"{s} {str(back)[:160]}")
+    s, man = call("GET", f"/api/tools/{tid}/manifest")
+    paths = sorted(f["path"] for f in man["files"])
+    check("the files that version had are back",
+          "widget/index.html" in paths, str(paths))
+    check("and the ones it did not have are gone",
+          "js/extra.js" not in paths, str(paths))
+
+    with urllib.request.urlopen(f"{B}/api/tools/{tid}/serve/js/app.js", timeout=30) as r:
+        body = r.read()
+    check("the restored bytes are the old ones, not just the old file list",
+          b"'dashboard'" in body and b"v2" not in body, body[:80])
+
+    s, versions_now = call("GET", f"/api/tools/{tid}/versions")
+    check("restoring is itself a version, so nothing is lost by going back",
+          len(versions_now) == 3 and versions_now[0]["origin"] == "restore",
+          str([(v["number"], v["origin"]) for v in versions_now]))
+    check("and it says what it was restored from",
+          "version 1" in (versions_now[0]["note"] or ""), str(versions_now[0]["note"]))
+
+    s, r = call("POST", f"/api/tools/{tid}/versions/999999/restore")
+    check("a version id from another tool is refused", s == 404, f"{s}")
+
+    section("A tool with no link")
+
+    s, plain = call("POST", "/api/tools", {"name": f"Hand made {RUN}"})
+    made_tools.append(plain["id"])
+    s, r = call("POST", f"/api/tools/{plain['id']}/pull")
+    check("pulling an uploaded tool explains itself rather than erroring",
+          s == 422 and "uploaded rather than imported" in str(r), f"{s} {str(r)[:200]}")
+
+    section("Storing the same file twice")
+
+    # Two tools from the same repository share every byte. The point of
+    # addressing content by its digest is that the second costs nothing.
+    s, twin = imported(f"{base}/acme/legacy", name=f"Twin A {RUN}")
+    made_tools.append(twin["tool"]["id"])
+    s, twin2 = imported(f"{base}/acme/legacy", name=f"Twin B {RUN}")
+    made_tools.append(twin2["tool"]["id"])
+    check("two tools can hold identical files", s == 200 and twin2["imported"] == 1,
+          f"{s} {str(twin2)[:120]}")
+
+    # Deleting one must not take the other's history with it.
+    call("DELETE", f"/api/tools/{twin['tool']['id']}")
+    made_tools.remove(twin["tool"]["id"])
+    s, still = call("GET", f"/api/tools/{twin2['tool']['id']}/versions")
+    check("deleting one leaves the other's history intact",
+          s == 200 and len(still) == 1, f"{s} {len(still or [])}")
+    with urllib.request.urlopen(
+            f"{B}/api/tools/{twin2['tool']['id']}/serve/index.html", timeout=30) as r:
+        check("and its files still serve", b"Legacy" in r.read())
+
     section("With the allowlist empty")
 
     # The API has one, so this is asked of the module directly - the same way

@@ -302,6 +302,20 @@ const acctsJson = JSON.stringify(await api('GET', `/api/servers/${srv.id}/accoun
 check('the API the page called never sent the password to the browser',
   !acctsJson.includes(SECRET), acctsJson.slice(0, 160));
 
+section('Taking it without looking at it');
+
+// The common case is pasting into a login box, and revealing first put the
+// password on screen for no reason. Copying must reach the clipboard and
+// leave the page as it was - and still be on the record.
+await p.locator('[data-copy-password]').first().click();
+await p.waitForTimeout(1400);
+body = await p.locator('body').textContent();
+check('copying never draws the password on the page', !body.includes(SECRET), body.slice(0, 200));
+check('and says it copied', /copied/i.test(body), body.slice(0, 200));
+const copiedPw = await p.evaluate(() => navigator.clipboard.readText().catch(() => ''));
+check('the password really is on the clipboard', copiedPw === SECRET,
+  copiedPw ? 'got something else' : 'clipboard empty');
+
 section('Reading it back, deliberately');
 
 await p.locator('button:has-text("Reveal")').first().click();
@@ -322,6 +336,8 @@ body = await p.locator('body').textContent();
 check('the access log is readable from the row', body.includes('Access log'));
 check('it shows the write', body.includes('SET'));
 check('it shows the read', body.includes('REVEAL'));
+// Copying is a different event from displaying, and the log says which.
+check('it shows the copy as its own kind of access', body.includes('COPY'));
 check('the log does not print the password itself', !body.includes(SECRET));
 
 section('One click into a client');

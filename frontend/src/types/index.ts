@@ -251,6 +251,11 @@ export interface Tool {
   description?: string | null;
   entry_path?: string | null;
   pinned: boolean;
+  /** Where it was imported from, when it was. Set by importing, not by hand. */
+  source_url?: string | null;
+  source_ref?: string | null;
+  source_subdir?: string | null;
+  imported_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -419,6 +424,31 @@ export interface ImportStatus {
   max_bytes: number;
 }
 
+/** One recorded state of a tool's files. */
+export interface ToolVersion {
+  id: number;
+  number: number;
+  /** How it came about: a pull, an upload, or going back to an earlier one. */
+  origin: 'import' | 'upload' | 'restore';
+  note?: string | null;
+  source_url?: string | null;
+  source_ref?: string | null;
+  entry_path?: string | null;
+  file_count: number;
+  total_bytes: number;
+  created_at?: string | null;
+  changes: { added: string[]; changed: string[]; removed: string[] };
+  current: boolean;
+}
+
+export interface RestoreResult {
+  tool: { id: number; name: string };
+  restored_from: number;
+  version: number;
+  files: number;
+  message: string;
+}
+
 export interface ImportResult {
   tool: { id: number; name: string; description?: string | null; entry_path?: string | null };
   imported: number;
@@ -430,4 +460,7 @@ export interface ImportResult {
   /** Why files were left behind, and how many of each. */
   skipped: Record<string, number>;
   files: string[];
+  /** The version this import created, or null when nothing changed. */
+  version?: number | null;
+  changes?: { added: string[]; changed: string[]; removed: string[] };
 }

@@ -8,9 +8,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Attachment, Tool
+from app.models import Attachment, Tool, ToolVersion
 from app.partial import make_partial, make_lenient, merge
-from app.services import repo_import
+from app.services import repo_import, tool_versions
 from app.validation import Name
 
 router = APIRouter()
@@ -22,6 +22,12 @@ class ToolSchema(BaseModel):
     description: Optional[str] = None
     entry_path: Optional[str] = "index.html"
     pinned: bool = False
+    # Where it came from, when it came from a repository. Read-only in
+    # practice: set by importing, not by typing.
+    source_url: Optional[str] = None
+    source_ref: Optional[str] = None
+    source_subdir: Optional[str] = None
+    imported_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -90,9 +96,11 @@ def delete_tool(tool_id: int, db: Session = Depends(get_db)):
     row = db.query(Tool).filter(Tool.id == tool_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Tool not found")
-    # The files belong to the tool, so they go with it.
+    # The files belong to the tool, so they go with it - and so does every
+    # version of them, including any stored bytes nothing else still refers to.
     for f in files_of(db, tool_id):
         db.delete(f)
+    tool_versions.forget(db, tool_id)
     db.delete(row)
     db.commit()
     return {"message": "Tool deleted"}
@@ -185,13 +193,29 @@ def import_from_link(body: ImportBody, db: Session = Depends(get_db)):
              or root or html)
     if index:
         tool.entry_path = index[0]
+
+    # The pasted link, not the archive URL it resolved to. Pulling again then
+    # re-resolves: a branch that has moved on is followed, and a project that
+    # renames master to main keeps working without anyone editing anything.
+    tool.source_url = result.link or result.source_url
+    tool.source_ref = result.ref
+    tool.source_subdir = result.subdir or None
+    tool.imported_at = datetime.utcnow()
     tool.updated_at = datetime.utcnow()
+    db.flush()
+
+    version = tool_versions.snapshot(
+        db, tool, origin=tool_versions.IMPORT,
+        note=f"Pulled from {result.source_url}",
+    )
+    before = tool_versions.history(db, tool.id, limit=2)
+    diff = tool_versions.changes(before[1] if len(before) > 1 else None, version) \
+        if version else {"added": [], "changed": [], "removed": []}
     db.commit()
     db.refresh(tool)
 
     return {
-        "tool": {"id": tool.id, "name": tool.name, "description": tool.description,
-                 "entry_path": tool.entry_path, "pinned": bool(tool.pinned)},
+        "tool": _tool_out(tool),
         "imported": len(written),
         "bytes": sum(len(b) for _, b in result.files),
         "entry_path": tool.entry_path,
@@ -200,6 +224,90 @@ def import_from_link(body: ImportBody, db: Session = Depends(get_db)):
         "source_url": result.source_url,
         "skipped": result.skipped,
         "files": sorted(written)[:50],
+        "version": version.number if version else None,
+        "changes": diff,
+    }
+
+
+def _tool_out(tool: Tool) -> dict:
+    return {
+        "id": tool.id, "name": tool.name, "description": tool.description,
+        "entry_path": tool.entry_path, "pinned": bool(tool.pinned),
+        "source_url": tool.source_url, "source_ref": tool.source_ref,
+        "source_subdir": tool.source_subdir,
+        "imported_at": tool.imported_at,
+    }
+
+
+@router.post("/{tool_id}/pull")
+def pull(tool_id: int, db: Session = Depends(get_db)):
+    """Fetch this tool's link again.
+
+    Deliberately not automatic. A tool that silently re-pulled would change
+    under someone mid-incident, which is the worst possible moment for the page
+    in front of you to become a different page.
+    """
+    tool = db.query(Tool).filter(Tool.id == tool_id).first()
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    if not tool.source_url:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{tool.name} was uploaded rather than imported, so there is "
+                   f"no link to pull from. Import it from one and it will "
+                   f"remember where.",
+        )
+    return import_from_link(ImportBody(url=tool.source_url, tool_id=tool.id), db)
+
+
+# ------------------------------------------------------------------- versions
+
+@router.get("/{tool_id}/versions")
+def versions(tool_id: int, db: Session = Depends(get_db), limit: int = Query(50)):
+    """Every version of this tool, newest first, and what changed in each."""
+    if not db.query(Tool.id).filter(Tool.id == tool_id).first():
+        raise HTTPException(status_code=404, detail="Tool not found")
+
+    rows = tool_versions.history(db, tool_id, limit=limit)
+    out = []
+    for i, v in enumerate(rows):
+        previous = rows[i + 1] if i + 1 < len(rows) else None
+        out.append({
+            "id": v.id, "number": v.number, "origin": v.origin, "note": v.note,
+            "source_url": v.source_url, "source_ref": v.source_ref,
+            "entry_path": v.entry_path,
+            "file_count": v.file_count, "total_bytes": v.total_bytes,
+            "created_at": v.created_at,
+            "changes": tool_versions.changes(previous, v),
+            "current": i == 0,
+        })
+    return out
+
+
+@router.post("/{tool_id}/versions/{version_id}/restore")
+def restore_version(tool_id: int, version_id: int, db: Session = Depends(get_db)):
+    """Put the files back to how this version had them."""
+    tool = db.query(Tool).filter(Tool.id == tool_id).first()
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    version = (
+        db.query(ToolVersion)
+        .filter(ToolVersion.id == version_id, ToolVersion.tool_id == tool_id)
+        .first()
+    )
+    if not version:
+        raise HTTPException(
+            status_code=404, detail="That version does not belong to this tool")
+
+    restored, made = tool_versions.restore(db, tool, version)
+    db.commit()
+    db.refresh(tool)
+    return {
+        "tool": _tool_out(tool),
+        "restored_from": version.number,
+        "version": made.number,
+        "files": restored,
+        "message": f"Back to version {version.number}, kept as version {made.number}.",
     }
 
 

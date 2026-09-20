@@ -11,7 +11,7 @@ from .meetings import Meeting
 from .categories import Category
 from .activity import Activity
 from .attachments import Attachment
-from .tools import Tool
+from .tools import Tool, ToolBlob, ToolVersion
 from .calendar import CalendarConnection, AppSecret
 from .knowledge import KnowledgeArticle
 from .servers import Server, ServerAccount, SecretAccess
@@ -31,6 +31,8 @@ __all__ = [
     "Activity",
     "Attachment",
     "Tool",
+    "ToolBlob",
+    "ToolVersion",
     "CalendarConnection",
     "AppSecret",
     "KnowledgeArticle",

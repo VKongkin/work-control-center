@@ -98,7 +98,9 @@ class SecretAccess(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     account_id = Column(Integer, nullable=False)
-    action = Column(String(16), nullable=False)  # SET | REVEAL | CLEAR | DENIED | LAUNCH
+    # COPY is a reveal that never reached the screen - straight to the
+    # clipboard. Same exposure, different story for whoever reads this later.
+    action = Column(String(16), nullable=False)  # SET | REVEAL | COPY | CLEAR | DENIED | LAUNCH
     at = Column(DateTime, default=datetime.utcnow)
     detail = Column(String(500), nullable=True)
 

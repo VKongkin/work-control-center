@@ -181,6 +181,19 @@ async def upload(
         raise HTTPException(status_code=422, detail="Every file sent was empty")
 
     db.commit()
+
+    # A tool's files are versioned, however they arrive. Uploading a corrected
+    # index.html is as much a change worth being able to undo as a pull is, and
+    # a history with holes in it is one nobody trusts.
+    if entity_type == "tool":
+        from app.models import Tool
+        from app.services import tool_versions
+        tool = db.query(Tool).filter(Tool.id == entity_id).first()
+        if tool:
+            tool_versions.snapshot(db, tool, origin=tool_versions.UPLOAD,
+                                   note=f"Uploaded {len(saved)} file(s)")
+            db.commit()
+
     for row in saved:
         db.refresh(row)
     return saved

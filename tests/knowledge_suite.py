@@ -506,6 +506,24 @@ check("a server is findable by its DNS name", any(r["id"] == sid for r in (rows 
       f"got {s} {[r.get('dns_name') for r in (rows or [])][:3]}")
 call("PUT", f"/api/servers/{sid}", {"dns_name": None})
 
+# The account name is often the only thing anyone remembers - "which box is
+# svc_mqm on" - and before this the answer was to open servers one at a time.
+s, rows = call("GET", "/api/servers?limit=500&q=wasadmin")
+check("a server is findable by an account's username",
+      any(r["id"] == sid for r in (rows or [])),
+      f"got {s} {[r.get('name') for r in (rows or [])][:3]}")
+check("and it appears once however many accounts match",
+      len([r for r in (rows or []) if r["id"] == sid]) == 1,
+      f"{len([r for r in (rows or []) if r['id'] == sid])} copies")
+s, rows = call("GET", f"/api/servers?limit=500&q=wasadmin+mbsapp01-{RUN}")
+check("account names combine with the other words rather than replacing them",
+      any(r["id"] == sid for r in (rows or [])), f"got {s} {len(rows or [])}")
+s, rows = call("GET", "/api/servers?limit=500&q=wasadmin+neverappears")
+check("and every word still has to match something",
+      not any(r["id"] == sid for r in (rows or [])), f"got {s} {len(rows or [])}")
+s, rows = call("GET", "/api/servers?limit=500&q=nosuchaccountanywhere")
+check("a username nobody has finds nothing", rows == [], str(rows)[:120])
+
 s, plan = call("POST", f"/api/servers/accounts/{acid}/connect?method=rdp")
 if vault_on:
     check("rdp gives back a plan", s == 200 and plan.get("launch"), f"{s} {str(plan)[:120]}")
@@ -605,6 +623,23 @@ if vault_on:
     check("the log records the read", "REVEAL" in actions, str(actions))
     check("the log keeps the reason given",
           any((r.get("detail") or "").startswith("suite check") for r in log), str(log[:2]))
+
+    # Copying to the clipboard is the same exposure - the plaintext leaves the
+    # server either way - but it is a different event, and the log should say
+    # which happened rather than flattening both into "REVEAL".
+    s, cp = call("POST", f"/api/servers/accounts/{acid}/reveal"
+                         f"?to_clipboard=true&reason=copied%20to%20clipboard")
+    check("a password can be had without putting it on screen",
+          s == 200 and cp.get("secret") == CANARY, f"{s} {str(cp)[:120]}")
+    s, log2 = call("GET", f"/api/servers/accounts/{acid}/access-log")
+    actions2 = [r["action"] for r in (log2 or [])]
+    check("and it is logged as a copy, not disguised as a reveal",
+          "COPY" in actions2, str(actions2))
+    check("the earlier reveal is still there as its own kind",
+          "REVEAL" in actions2, str(actions2))
+    check("the copy still records a reason",
+          any(r["action"] == "COPY" and "clipboard" in (r.get("detail") or "")
+              for r in log2), str(log2[:2]))
 else:
     check("a refused write is still logged", "DENIED" in actions, str(actions))
 check("the log itself never contains the password", CANARY not in json.dumps(log))

@@ -334,6 +334,25 @@ Only web files are kept — HTML, CSS, JavaScript, images, fonts. The repository
 CI config, lockfiles and `node_modules` are left behind, and the import says how
 many and why rather than dropping them silently.
 
+A tool imported this way remembers its link, so pulling again is one click. Every
+pull and every upload records a version, and a tool can be put back to any of
+them — see **Tool history** below.
+
+### Tool history
+
+Each time a tool's files change, WCC records what they were. The Files dialog has
+a History tab listing every version with what was added, changed and removed, and
+a Restore button on each.
+
+Restoring is recorded as a version of its own rather than deleting what came
+after. The question that follows a rollback is always "what was I running when it
+broke", and a history that quietly loses that is worse than not having one.
+
+Storage is content-addressed: a file's bytes are kept once under their SHA-256 and
+shared by every version containing them. A tool pulled twenty times with one line
+changed costs one line, not twenty copies — which is what makes keeping every
+version the default rather than a setting you would turn on and then forget.
+
 ## Updating
 
 ```bash

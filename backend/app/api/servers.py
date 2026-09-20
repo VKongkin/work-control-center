@@ -142,7 +142,11 @@ def list_servers(
     environment: Optional[str] = Query(None),
     system_id: Optional[int] = Query(None),
     include_inactive: bool = Query(False),
-    q: Optional[str] = Query(None, description="Free text across name, hostname, DNS name, IP and role"),
+    q: Optional[str] = Query(
+        None,
+        description="Free text across name, hostname, DNS name, IP, role, notes "
+                    "and the usernames of the server's accounts",
+    ),
 ):
     query = db.query(Server)
     if not include_inactive:
@@ -153,11 +157,25 @@ def list_servers(
         query = query.filter(Server.system_id == system_id)
     for word in (q or "").split():
         like = f"%{word}%"
+        # An account name is frequently the only thing you remember. "Which box
+        # is svc_mqm on again" is a real question, and before this the answer
+        # was to open servers one at a time until one of them had it.
+        #
+        # EXISTS rather than a join: a server with three matching accounts must
+        # appear once, and a join would return it three times.
+        on_an_account = (
+            db.query(ServerAccount.id)
+            .filter(ServerAccount.server_id == Server.id,
+                    ServerAccount.active.is_(True),
+                    ServerAccount.username.ilike(like))
+            .exists()
+        )
         query = query.filter(
             or_(Server.name.ilike(like), Server.hostname.ilike(like),
                 Server.dns_name.ilike(like),
                 Server.ip_address.ilike(like), Server.role.ilike(like),
-                Server.notes.ilike(like))
+                Server.notes.ilike(like),
+                on_an_account)
         )
     return query.order_by(Server.environment, Server.name).offset(skip).limit(limit).all()
 
@@ -301,11 +319,23 @@ def set_secret(account_id: int, body: SecretBody, db: Session = Depends(get_db))
 
 @router.post("/accounts/{account_id}/reveal")
 def reveal_secret(account_id: int, db: Session = Depends(get_db),
-                  reason: Optional[str] = Query(None, description="Why, for the log")):
+                  reason: Optional[str] = Query(None, description="Why, for the log"),
+                  to_clipboard: bool = Query(
+                      False,
+                      description="The password is going to the clipboard rather "
+                                  "than onto the screen. Logged as COPY.")):
     """Return the plaintext password, and record that it happened.
 
     The log row is written whatever the outcome, including failures: an attempt
     to read a credential is worth knowing about even when it did not succeed.
+
+    `to_clipboard` does not change what the server does - the plaintext leaves
+    either way, and pretending otherwise would be the kind of comfortable lie
+    this module exists to avoid. It changes what the log says, because the two
+    are genuinely different events: a password on screen can be read over a
+    shoulder or caught in a screenshot, and one that went straight to the
+    clipboard was never displayed. Anyone reading the log later deserves to
+    know which of those happened.
     """
     row = _get_account(db, account_id)
 
@@ -323,7 +353,8 @@ def reveal_secret(account_id: int, db: Session = Depends(get_db),
         db.commit()
         raise HTTPException(status_code=409, detail=str(e))
 
-    _log(db, account_id, "REVEAL", (reason or "no reason given")[:200])
+    _log(db, account_id, "COPY" if to_clipboard else "REVEAL",
+         (reason or "no reason given")[:200])
     db.commit()
     return {"username": row.username, "secret": secret, "revealed_at": datetime.utcnow()}
 
