@@ -16,6 +16,7 @@ from .calendar import CalendarConnection, AppSecret
 from .knowledge import KnowledgeArticle
 from .servers import Server, ServerAccount, SecretAccess
 from .chat import ChatThread, ChatMessage
+from .plans import DayPlan, PlanBlock
 
 __all__ = [
     "Task",
@@ -41,4 +42,6 @@ __all__ = [
     "SecretAccess",
     "ChatThread",
     "ChatMessage",
+    "DayPlan",
+    "PlanBlock",
 ]

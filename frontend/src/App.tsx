@@ -19,6 +19,7 @@ import ToolsPage from './pages/ToolsPage';
 import ToolRunPage from './pages/ToolRunPage';
 import CalendarSettingsPage from './pages/CalendarSettingsPage';
 import ChatPage from './pages/ChatPage';
+import PlanPage from './pages/PlanPage';
 import KnowledgePage from './pages/KnowledgePage';
 import ServersPage from './pages/ServersPage';
 import AlertsPage from './pages/AlertsPage';
@@ -59,6 +60,7 @@ export default function App() {
                   <Route path="/systems" element={<SystemsPage />} />
                   <Route path="/categories" element={<CategoriesPage />} />
                   <Route path="/chat" element={<ChatPage />} />
+                  <Route path="/plan" element={<PlanPage />} />
                   <Route path="/knowledge" element={<KnowledgePage />} />
                   <Route path="/servers" element={<ServersPage />} />
                   <Route path="/tools" element={<ToolsPage />} />

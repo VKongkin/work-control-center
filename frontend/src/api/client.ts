@@ -5,6 +5,7 @@ import type {
   SecretAccessEntry, VaultStatus, ConnectPlan, DocxImportResult,
   ChatStatus, ChatThread, ChatMessage, ChatTurn, ImportStatus, ImportResult,
   ToolVersion, RestoreResult, ToolManifest,
+  DayPlan, PlanBlock, PlanSuggestion, PlanExport, BlockKind,
   Server as ServerRecord,
 } from '../types';
 
@@ -154,6 +155,42 @@ export const serverApi = {
       { params: { reason, to_clipboard: toClipboard || undefined } }),
   accessLog: (id: number) =>
     client.get<SecretAccessEntry[]>(`/servers/accounts/${id}/access-log`),
+};
+
+/**
+ * The day plan. Deliberately not the calendar: /api/meetings is what you have
+ * agreed to attend, this is what you mean to do with the hours around it. They
+ * meet at `seed`, which starts a day with the diary already in it.
+ */
+export const planApi = {
+  recent: (limit = 30) => client.get<DayPlan[]>('/plans', { params: { limit } }),
+  forDay: (on: string) => client.get<DayPlan>(`/plans/day/${on}`),
+  create: (body: {
+    plan_date: string; title?: string; notes?: string;
+    day_start?: string | number; day_end?: string | number;
+    blocks?: Partial<PlanBlock>[];
+  }) => client.post<DayPlan>('/plans', body),
+  patch: (id: number, body: Record<string, unknown>) =>
+    client.patch<DayPlan>(`/plans/${id}`, body),
+  remove: (id: number) => client.delete(`/plans/${id}`),
+
+  seed: (on: string, params?: { day_start?: string; day_end?: string; include_meetings?: boolean }) =>
+    client.post<DayPlan>('/plans/seed', null, { params: { on, ...params } }),
+  copy: (id: number, to: string) =>
+    client.post<DayPlan>(`/plans/${id}/copy`, null, { params: { to } }),
+
+  addBlock: (planId: number, body: {
+    start: string | number; end: string | number; title: string;
+    kind?: BlockKind; activity?: string; theme?: string; task_id?: number;
+  }) => client.post<DayPlan>(`/plans/${planId}/blocks`, body),
+  patchBlock: (blockId: number, body: Record<string, unknown>) =>
+    client.patch<DayPlan>(`/plans/blocks/${blockId}`, body),
+  removeBlock: (blockId: number) => client.delete<DayPlan>(`/plans/blocks/${blockId}`),
+
+  /** What is pressing enough to deserve an hour today. */
+  suggestions: (on?: string) =>
+    client.get<PlanSuggestion[]>('/plans/suggest/tasks', { params: { on } }),
+  exportText: (id: number) => client.get<PlanExport>(`/plans/${id}/export`),
 };
 
 export const agentApi = {

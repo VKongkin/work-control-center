@@ -358,6 +358,17 @@ await go('/tasks');
 await fetch(BASE + `/api/tasks/${doneProbe.id}`, { method: 'DELETE' });
 
 section('Issues lead with the worst');
+
+// A resolved issue, made here rather than hoped for. The check below used to
+// depend on one already existing, so it passed on a database somebody had been
+// using and failed on a fresh one - which says nothing about the page.
+const resolvedIssue = await fetch(BASE + `/api/issues`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    title: `UI resolved probe ${stamp()}`, severity: 'LOW', status: 'RESOLVED',
+  }),
+}).then((r) => r.json()).catch(() => null);
+
 await go('/issues');
 {
   const body = await page.locator('body').textContent();
@@ -384,7 +395,8 @@ await go('/issues');
   await page.waitForTimeout(700);
   check('the All scope reaches the URL', page.url().includes('scope=all'), page.url());
   check('resolved issues are folded away there',
-    (await page.locator('button[aria-expanded]', { hasText: 'Resolved' }).count()) > 0, '');
+    (await page.locator('button[aria-expanded]', { hasText: 'Resolved' }).count()) > 0,
+    resolvedIssue?.id ? 'a resolved issue exists but no fold' : 'could not create the fixture');
 
   await page.locator('#f-filter-severity').selectOption('CRITICAL');
   await page.waitForTimeout(1100);
@@ -510,6 +522,12 @@ await page.waitForTimeout(300);
 if (await page.locator('button:has-text("Discard changes")').count())
   await page.locator('button:has-text("Discard changes")').click();
 await page.waitForTimeout(300);
+
+// The fixture this suite made for the Issues fold, taken away again - a
+// suite that leaves rows behind changes the next run's answer.
+if (resolvedIssue?.id) {
+  await fetch(`${BASE}/api/issues/${resolvedIssue.id}`, { method: 'DELETE' }).catch(() => {});
+}
 
 section('Console health');
 const real = errors.filter(e => !/favicon|React DevTools|Failed to load resource.*40[49]/i.test(e));

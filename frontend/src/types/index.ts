@@ -466,3 +466,71 @@ export interface ImportResult {
   version?: number | null;
   changes?: { added: string[]; changed: string[]; removed: string[] };
 }
+
+/* ------------------------------------------------------------- day plan --
+ * The diary says what you agreed to attend; a plan says what you intend to do
+ * with the rest. Times are minutes since midnight - the plan is arithmetic,
+ * and a plan for Tuesday should read the same wherever you open it.
+ */
+export type BlockKind = 'WORK' | 'BREAK' | 'LUNCH' | 'BUFFER' | 'MEETING';
+
+export interface PlanBlock {
+  id: number;
+  plan_id: number;
+  start: number;
+  end: number;
+  /** "08:30" - the server formats these so every client agrees. */
+  from: string;
+  to: string;
+  minutes: number;
+  kind: BlockKind;
+  title: string;
+  activity?: string | null;
+  theme?: string | null;
+  task_id?: number | null;
+  meeting_id?: number | null;
+  done: boolean;
+}
+
+export interface PlanSlice { theme: string; minutes: number; hours: number; blocks: number; done: number; }
+export interface PlanGap { from: string; to: string; minutes: number; }
+export interface PlanClash {
+  a: { id: number; title: string; from: string; to: string };
+  b: { id: number; title: string; from: string; to: string };
+  minutes: number;
+}
+
+export interface DayPlan {
+  id: number;
+  plan_date: string;
+  title?: string | null;
+  notes?: string | null;
+  day_start: number;
+  day_end: number;
+  from: string;
+  to: string;
+  day_minutes: number;
+  planned_minutes: number;
+  work_minutes: number;
+  rest_minutes: number;
+  unplanned_minutes: number;
+  done_minutes: number;
+  blocks: PlanBlock[];
+  breakdown: PlanSlice[];
+  overlaps: PlanClash[];
+  gaps: PlanGap[];
+  /** Set when ticking a block finished the task behind it. */
+  completed_task?: { id: number; title: string } | null;
+}
+
+export interface PlanSuggestion {
+  id: number;
+  title: string;
+  priority: string;
+  status: string;
+  due_date?: string | null;
+  overdue: boolean;
+  next_action?: string | null;
+}
+
+export interface PlanExport { timetable: string; checklist: string; markdown: string; }

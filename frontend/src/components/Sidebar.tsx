@@ -6,7 +6,7 @@ import { MUTATION_EVENT } from '../hooks/useResource';
 import {
   Home, Inbox, CheckSquare, Clock, BarChart3, AlertCircle, Users, Building,
   Package, Server, Bug, CalendarDays, Tag, Search, X, Wrench, Star, CalendarRange,
-  BookOpen, HardDrive, Sparkles,
+  BookOpen, HardDrive, Sparkles, CalendarClock,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -22,6 +22,10 @@ const GROUPS = [
       { icon: Inbox, label: 'Inbox', to: '/tasks?status=INBOX' },
       { icon: CheckSquare, label: 'Tasks', to: '/tasks' },
       { icon: Clock, label: 'Follow-ups', to: '/followups' },
+      // Next to the lists it draws from, and above Alerts: the plan is a
+      // morning thing, and a morning thing buried under Directory is a
+      // morning thing nobody opens.
+      { icon: CalendarClock, label: 'Day plan', to: '/plan' },
       { icon: AlertCircle, label: 'Alerts', to: '/alerts' },
       { icon: Search, label: 'Search', to: '/search' },
       // High up on purpose: this is meant to be the thing you open first in the
