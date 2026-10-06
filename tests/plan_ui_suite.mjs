@@ -193,6 +193,186 @@ check('the task list copies as plain tickable lines',
 check('and leaves lunch out of it, because lunch is not a to-do',
   !copied.includes('Lunch'), copied);
 
+/* ═══════════════════════════ what am I doing now ═════════════════════════ */
+/**
+ * Everything below runs against a *frozen* clock in the timezone this app is
+ * actually used in (UTC+7), rather than against whatever time the test
+ * machine happens to hold.
+ *
+ * That is not neatness. The blocks are stored as minutes since local midnight
+ * and the server runs in UTC, so a page that worked out "now" from the server,
+ * or from a UTC date, would be seven hours wrong here - which looks like
+ * nothing at all in a CI box running at UTC, and looks like the wrong task all
+ * morning on the machine this was built for. Freezing the clock at a known
+ * local time is the only way to tell those two apart.
+ */
+section('Which block am I in right now');
+
+const NOW_DAY = new Date(Date.parse(DAY) + 86400000 * 7).toISOString().slice(0, 10);
+const TZ = 'Asia/Phnom_Penh';   // UTC+7, no DST
+
+const nowPlan = await api('POST', '/api/plans', { plan_date: NOW_DAY, title: 'Clock day' });
+cleanup.plans.push(nowPlan.id);
+for (const [start, end, kind, title, theme] of [
+  ['08:00', '09:30', 'WORK', `Readiness checklist ${stamp}`, 'VDA go-live'],
+  ['09:30', '09:45', 'BREAK', 'Coffee', null],
+  ['09:45', '11:15', 'WORK', `Endpoint cutover check ${stamp}`, 'VDA go-live'],
+  // 11:15-12:00 left empty on purpose: somewhere to stand in a gap
+  ['12:00', '13:00', 'LUNCH', 'Lunch', null],
+  ['13:00', '14:15', 'WORK', `Preprod deployment ${stamp}`, 'MBS/API preprod'],
+  ['16:00', '16:30', 'BUFFER', `Follow-up ${stamp}`, 'Buffer'],
+]) {
+  await api('POST', `/api/plans/${nowPlan.id}/blocks`,
+    { start, end, kind, title, theme: theme ?? undefined });
+}
+
+// A plan on the following day too, so that stepping forward lands on a day
+// that has something on it rather than on the empty-day page.
+const nextDay = new Date(Date.parse(NOW_DAY) + 86400000).toISOString().slice(0, 10);
+const nextPlan = await api('POST', '/api/plans', { plan_date: nextDay });
+cleanup.plans.push(nextPlan.id);
+await api('POST', `/api/plans/${nextPlan.id}/blocks`,
+  { start: '09:00', end: '10:00', title: `Tomorrow's first thing ${stamp}` });
+
+/** A page whose clock is stopped at `hhmm` on the fixture day, in UTC+7. */
+async function at(hhmm, day = NOW_DAY) {
+  const c = await b.newContext({
+    viewport: { width: 1440, height: 1100 }, timezoneId: TZ,
+    permissions: ['clipboard-read', 'clipboard-write'],
+  });
+  const page = await c.newPage();
+  page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
+  await page.clock.install({ time: new Date(`${day}T${hhmm}:00+07:00`) });
+  await page.goto(B + '/plan', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(900);
+  return { c, page };
+}
+const stateOf = pg => pg.locator('[data-now]').getAttribute('data-now-state');
+
+// ---- 10:15, which is 03:15 UTC: the hour the whole feature turns on -------
+{
+  const { c, page } = await at('10:15');
+  check('the page says what is running right now', await page.locator('[data-now]').count() === 1);
+  check('and knows it is mid-block', await stateOf(page) === 'current', await stateOf(page));
+
+  const panel = await page.locator('[data-now]').textContent();
+  check('it names the block the clock is actually inside',
+    panel.includes(`Endpoint cutover check ${stamp}`), panel.slice(0, 200));
+  // The proof that it read the browser's clock and not the server's: at 10:15
+  // local it is 03:15 UTC, which is before this day has started at all. A page
+  // working in UTC would say "the day starts at 08:00", not name a block.
+  check('reading the local clock, not the server in UTC',
+    !panel.includes('The day starts'), panel.slice(0, 200));
+  check('it says how much of the block is left',
+    (await page.locator('[data-now-left]').textContent()).includes('1h 00m left'),
+    await page.locator('[data-now-left]').textContent());
+  check('and what is up next, with the wait',
+    /Lunch/.test(await page.locator('[data-now-next]').textContent())
+    && /1h 45m/.test(await page.locator('[data-now-next]').textContent()),
+    await page.locator('[data-now-next]').textContent());
+
+  const live = (await api('GET', `/api/plans/day/${NOW_DAY}`))
+    .blocks.find(x => x.title.startsWith('Endpoint cutover check'));
+  check('the timetable marks that same row, so the two cannot disagree',
+    await page.locator(`[data-current="${live.id}"]`).count() === 1);
+  check('exactly one row is marked current',
+    await page.locator('[data-current]').count() === 1);
+  check('the row carries a now badge with the time left',
+    (await page.locator('[data-now-pill]').textContent()).includes('1h 00m'),
+    await page.locator('[data-now-pill]').textContent());
+  check('blocks that have been and gone are faded, those to come are not',
+    await page.locator('[data-past]').count() === 2,
+    `${await page.locator('[data-past]').count()} past`);
+  check('and it offers to take you to it', await page.locator('#jump-now').count() === 1);
+
+  // Ticking from the panel, which is where your eye already is.
+  await page.locator('[data-now-tick]').click();
+  await page.waitForTimeout(1200);
+  check('ticking it off from the panel counts the time as done',
+    (await page.locator('[data-breakdown]').textContent()).includes('1h 30m'),
+    await page.locator('[data-breakdown]').textContent());
+  const reread = (await api('GET', `/api/plans/day/${NOW_DAY}`))
+    .blocks.find(x => x.id === live.id);
+  check('and it is really ticked in the database', reread.done === true);
+  await api('PATCH', `/api/plans/blocks/${live.id}`, { done: false });   // put it back
+  await c.close();
+}
+
+// ---- 11:30: in the hole between two blocks --------------------------------
+{
+  const { c, page } = await at('11:30');
+  check('standing in an unplanned stretch says so', await stateOf(page) === 'gap', await stateOf(page));
+  const left = await page.locator('[data-now-left]').textContent();
+  check('it says how long you have been free and for how much longer',
+    left.includes('11:15') && left.includes('30m'), left);
+  check('no row claims to be current when none is',
+    await page.locator('[data-current]').count() === 0);
+  check('a line is drawn across the day where the clock has got to',
+    await page.locator('[data-now-line]').count() === 1);
+  check('two earlier blocks are flagged as never ticked off',
+    await page.locator('[data-behind="2"]').count() === 1,
+    await page.locator('[data-now]').textContent());
+
+  // The gap is offered as something to fill, already filled in.
+  await page.locator('#plan-the-gap').click();
+  await page.waitForTimeout(500);
+  const dlg = page.locator('[role="dialog"]');
+  check('offering to plan the gap starts the form at the gap',
+    await dlg.locator('#f-block-start').inputValue() === '11:15'
+    && await dlg.locator('#f-block-end').inputValue() === '12:00',
+    `${await dlg.locator('#f-block-start').inputValue()}-${await dlg.locator('#f-block-end').inputValue()}`);
+  await c.close();
+}
+
+// ---- 07:28 and 16:46: the ends of the day --------------------------------
+{
+  const { c, page } = await at('07:28');
+  check('before the day starts it says when it does', await stateOf(page) === 'before', await stateOf(page));
+  check('and how long that is', (await page.locator('[data-now-left]').textContent()).includes('32m'),
+    await page.locator('[data-now-left]').textContent());
+
+  // The day arrows, in the timezone this is used in. Done here because a
+  // browser at UTC+7 is the only place the old arithmetic went wrong.
+  await page.locator('button[aria-label="Next day"]').click();
+  await page.waitForTimeout(700);
+  check('the next-day arrow moves exactly one day, east of Greenwich too',
+    await page.locator('#plan-date').inputValue() === nextDay,
+    `${await page.locator('#plan-date').inputValue()} wanted ${nextDay}`);
+  check('and another day is not pretending to be happening now',
+    await stateOf(page) === 'other-day', await stateOf(page));
+  check('with nothing on it marked as current',
+    await page.locator('[data-current]').count() === 0);
+
+  await page.locator('button[aria-label="Previous day"]').click();
+  await page.waitForTimeout(700);
+  check('and back again lands where it started',
+    await page.locator('#plan-date').inputValue() === NOW_DAY,
+    await page.locator('#plan-date').inputValue());
+  await c.close();
+}
+{
+  const { c, page } = await at('16:46');
+  check('after the last block the day is reported as done', await stateOf(page) === 'after', await stateOf(page));
+  check('with what was ticked and what is left of the day',
+    /0 of 6 ticked off/.test(await page.locator('[data-now-left]').textContent())
+    && /14m/.test(await page.locator('[data-now-left]').textContent()),
+    await page.locator('[data-now-left]').textContent());
+  await c.close();
+}
+
+// ---- 05:30, which is yesterday in UTC ------------------------------------
+{
+  // The bug this guards: new Date().toISOString().slice(0, 10) is today in
+  // UTC. At UTC+7 that is yesterday until 07:00, so the planner opened on
+  // yesterday's page every morning before seven - exactly when someone opens
+  // it to see what today holds.
+  const { c, page } = await at('05:30');
+  check('at half five in the morning the planner opens on today, not yesterday',
+    await page.locator('#plan-date').inputValue() === NOW_DAY,
+    `${await page.locator('#plan-date').inputValue()} wanted ${NOW_DAY}`);
+  await c.close();
+}
+
 /* ════════════════════════════════ cleanup ════════════════════════════════ */
 for (const id of cleanup.plans) await api('DELETE', `/api/plans/${id}`);
 for (const id of cleanup.tasks) await api('DELETE', `/api/tasks/${id}`);

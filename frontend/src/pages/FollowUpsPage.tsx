@@ -11,7 +11,7 @@ import {
   Badge, Button, ComboboxField, ConfirmDialog, DateField, EmptyState, ErrorBanner,
   ErrorSummary, Modal, PageHeader, SelectField, Spinner, TextAreaField, TextField,
 } from '../components/ui';
-import { FOLLOWUP_STATUSES, WAITING_FOR_TYPES, fmtDate, isOverdue, labelFor, toDateInput } from '../lib/constants';
+import { FOLLOWUP_STATUSES, WAITING_FOR_TYPES, fmtDate, isOverdue, labelFor, localDay, toDateInput } from '../lib/constants';
 import { maxLength, notBefore, required, saneDate } from '../lib/validators';
 
 const RULES = {
@@ -132,7 +132,10 @@ export default function FollowUpsPage() {
     return lk.nameOf('vendors', f.vendor_id);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  // The local calendar day, not the UTC one: at UTC+7 those differ for the
+  // first seven hours of every morning, which is exactly when someone looks
+  // at this page to see what is already late.
+  const today = localDay();
 
   return (
     <div className="space-y-5">

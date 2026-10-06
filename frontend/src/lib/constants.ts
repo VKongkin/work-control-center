@@ -119,6 +119,48 @@ export function toDateInput(value?: string | null): string {
 }
 
 /**
+ * Today, on the calendar hanging on the wall next to this machine.
+ *
+ * Deliberately not `new Date().toISOString().slice(0, 10)`, which is today in
+ * UTC. This machine runs at UTC+7, where every morning before 07:00 is still
+ * yesterday in UTC - so a page that asked for "today" that way would open on
+ * yesterday for the first seven hours of every working day.
+ */
+export function localDay(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * "2026-10-06" moved by whole days, staying on the local calendar.
+ *
+ * The obvious version - parse, setDate, toISOString - is wrong east of
+ * Greenwich: local midnight is the previous day in UTC, so stepping forward a
+ * day and formatting in UTC lands back where it started and the Next-day
+ * button does nothing.
+ */
+export function shiftDay(day: string, by: number): string {
+  const [y, m, d] = day.split('-').map(Number);
+  if (!y || !m || !d) return day;
+  const at = new Date(y, m - 1, d);     // local midnight, no round trip
+  at.setDate(at.getDate() + by);
+  return localDay(at);
+}
+
+/** Whole days from one local date to another: negative is in the past. */
+export function daysBetween(from: string, to: string): number {
+  const [ay, am, ad] = from.split('-').map(Number);
+  const [by, bm, bd] = to.split('-').map(Number);
+  return Math.round(
+    (Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86_400_000);
+}
+
+/** Minutes since local midnight - the unit the day plan counts in. */
+export function minutesOfDay(d: Date = new Date()): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/**
  * ISO timestamp -> "2026-09-03T09:00" for <input type="datetime-local">.
  * Built from the local parts rather than toISOString, which would shift the
  * clock by the timezone offset and quietly move every meeting.
