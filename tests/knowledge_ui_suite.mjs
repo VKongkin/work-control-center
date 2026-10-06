@@ -8,6 +8,7 @@
  *   WCC_URL=http://localhost:4173 CHROMIUM_PATH=... node tests/knowledge_ui_suite.mjs
  */
 import { chromium } from 'playwright';
+import { readFile } from 'node:fs/promises';
 
 const B = process.env.WCC_URL || 'http://localhost:3000';
 let pass = 0, fail = 0; const failures = [], errors = [];
@@ -626,6 +627,39 @@ for (const [path, heading] of [['/knowledge', 'Knowledge'], ['/servers', 'Server
   check(`${path} is marked active in the sidebar`,
     (await p.locator(`a[href="${path}"]`).first().getAttribute('class') || '').includes('blue'));
 }
+
+/* ═══════════════════════ taking a runbook out as Word ════════════════════ */
+section('Taking a runbook out as a Word file');
+
+const wordArticle = await api('POST', '/api/knowledge', {
+  title: `UI Export ${stamp}`, kind: 'RUNBOOK',
+  summary: 'For the colleague who does not have WCC open.',
+  body: '## Before you start\n\nCheck the **DR pair**.\n\n- one\n- two\n',
+});
+cleanup.articles.push(wordArticle.id);
+
+await go('/knowledge');
+await p.locator('[data-row-id]', { hasText: `UI Export ${stamp}` })
+  .first().locator('button').first().click();
+await p.waitForTimeout(800);
+check('the detail view offers the article as a Word file',
+  await D().locator(`[data-export-docx="${wordArticle.id}"]`).count() === 1,
+  await D().textContent());
+
+// The download itself, not merely a link that looks right. A href that 404s
+// still renders perfectly.
+const [wordFile] = await Promise.all([
+  p.waitForEvent('download', { timeout: 15000 }),
+  D().locator(`[data-export-docx="${wordArticle.id}"]`).click(),
+]);
+check('clicking it downloads a file named after the article',
+  wordFile.suggestedFilename() === `UI Export ${stamp}.docx`,
+  wordFile.suggestedFilename());
+
+const where = await wordFile.path();
+const magic = where ? (await readFile(where)).subarray(0, 2).toString('latin1') : '';
+check('and what arrives really is a Word document, not an error page',
+  magic === 'PK', `starts with "${magic}"`);
 
 /* ════════════════════════════════ cleanup ═══════════════════════════════ */
 for (const id of cleanup.articles) if (id) await api('DELETE', `/api/knowledge/${id}`);

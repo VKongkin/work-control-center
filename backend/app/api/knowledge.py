@@ -5,10 +5,11 @@ as one you never wrote - so the list endpoint takes a free-text query across
 everything a human would half-remember: the title, the summary, the body and
 the tags.
 """
+import re
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -17,7 +18,7 @@ from app.database import get_db
 from app.models import Attachment, KnowledgeArticle
 from app.models.attachments import MAX_FILE_BYTES
 from app.models.knowledge import KINDS, STATUSES
-from app.services import docx_import
+from app.services import docx_export, docx_import
 from app.partial import make_lenient, make_partial, merge
 from app.validation import Name, Timestamp, one_of
 
@@ -213,6 +214,66 @@ def _store(db: Session, article_id: int, filename: str, content_type: str,
     db.add(row)
     db.flush()          # an id, so the markdown can point at it
     return row
+
+
+# Only an attachment this application serves itself. An article's markdown can
+# hold any URL at all, and a server that fetched them while building a document
+# would be a server that fetches whatever a link in a note tells it to -
+# including the cloud metadata address. An external image is written as its alt
+# text instead, which is visible and harmless.
+LOCAL_IMAGE = re.compile(r"^/api/attachments/(\d+)/(?:inline|download)$")
+
+
+@router.get("/{article_id}/export/docx")
+def export_docx(article_id: int, db: Session = Depends(get_db)):
+    """The article as it reads today, as a Word document.
+
+    Not the .docx it was imported from, when there was one: that file is the
+    vendor's original and the article has been corrected since. Someone asking
+    for this wants the runbook that is true now, in a form they can mail to a
+    colleague who does not have WCC open.
+    """
+    article = db.query(KnowledgeArticle).filter(
+        KnowledgeArticle.id == article_id).first()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    def load_image(src: str):
+        m = LOCAL_IMAGE.match(src or "")
+        if not m:
+            return None
+        row = db.query(Attachment).filter(Attachment.id == int(m.group(1))).first()
+        if not row or not row.data:
+            return None
+        return row.data, row.content_type or "image/png"
+
+    blob = docx_export.build(
+        article.title,
+        article.body or "",
+        summary=article.summary,
+        properties={
+            "summary": article.summary,
+            "tags": article.tags,
+            "category": article.kind,
+            "comments": " · ".join(filter(None, [
+                f"WCC article #{article.id}",
+                article.status,
+                article.environment,
+                (f"last verified {article.last_verified_at:%Y-%m-%d}"
+                 if article.last_verified_at else None),
+            ])),
+        },
+        load_image=load_image,
+    )
+    name = docx_export.filename_for(article.title, article.id)
+    return Response(
+        content=blob,
+        media_type=DOCX_TYPES[0],
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "Content-Length": str(len(blob)),
+        },
+    )
 
 
 @router.post("/import/docx")

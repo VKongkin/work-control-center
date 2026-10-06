@@ -101,6 +101,13 @@ export const knowledgeApi = {
    * converted text is appended to that article. Either way the server owns the
    * result, so the caller takes the body it sends back rather than merging.
    */
+  /**
+   * The article as a Word file. A plain URL rather than a fetch-and-blob:
+   * the server already names the file in its Content-Disposition, so letting
+   * the browser do the download keeps the name, costs no memory, and works
+   * the same when the runbook has a dozen screenshots in it.
+   */
+  exportDocxUrl: (id: number) => `/api/knowledge/${id}/export/docx`,
   importDocx: (file: File, articleId?: number) => {
     const body = new FormData();
     body.append('file', file);

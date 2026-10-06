@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  BookOpen, CheckCircle2, FileText, Pencil, Pin, Search, Trash2, X,
+  BookOpen, CheckCircle2, FileDown, FileText, Pencil, Pin, Search, Trash2, X,
 } from 'lucide-react';
 import CrudPage, { FieldDef, ListRender } from '../components/CrudPage';
 import GroupedList from '../components/GroupedList';
@@ -171,6 +171,19 @@ export default function KnowledgePage() {
             ),
           }
         : { label: 'Verification', value: null },
+      {
+        label: 'Export',
+        value: (
+          <a
+            href={knowledgeApi.exportDocxUrl(row.id)}
+            download
+            data-export-docx={row.id}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800 ring-1 ring-inset ring-blue-200 hover:bg-blue-100"
+          >
+            <FileDown size={13} /> Download as Word
+          </a>
+        ),
+      },
     ];
   }
 

@@ -354,6 +354,181 @@ s, r = multipart("/api/knowledge/import/docx",
                  {"article_id": "999999"})
 check("importing into an article that does not exist is a 404", s == 404, f"{s} {r}")
 
+section("Knowledge: exporting an article as a Word document")
+
+
+def raw(path):
+    """Bytes and headers, not JSON: a .docx is not text.
+
+    The headers are handed back as the message object rather than as a dict:
+    uvicorn sends them lower-cased, and `dict(headers)["Content-Type"]` is a
+    KeyError dressed up as a passing test.
+    """
+    try:
+        with urllib.request.urlopen(f"{B}{path}", timeout=30) as r:
+            return r.status, r.read(), r.headers
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), e.headers
+
+
+EXPORT_BODY = """## Restarting the channel
+
+Check the **DR pair** is healthy and note the *change number* first.
+
+- Stop the listener
+- Drain the queue
+  - watch for in-flight messages
+- Start the listener
+
+1. Raise the change
+2. Get the `approval` from ops
+
+> Never do this during a cutover window.
+
+```
+mqsc> DISPLAY QSTATUS(SBI.*)
+mqsc> STOP CHANNEL(SBI.TO.CORE)
+```
+
+| Node | Role | Port |
+| --- | --- | --- |
+| mq-dc-01 | primary | 1414 |
+| mq-dr-01 | standby | 1414 |
+
+See the [vendor guide](https://example.invalid/mq) for the rest.
+"""
+
+s, exp = call("POST", "/api/knowledge", {
+    "title": f"KB Export {RUN}", "kind": "RUNBOOK", "status": "PUBLISHED",
+    "summary": "What to do when the channel stops.",
+    "tags": f"mq,export,kb{RUN}",
+    "body": EXPORT_BODY,
+})
+eid = exp.get("id") if s == 200 else None
+if eid:
+    made_articles.append(eid)
+
+    # An image in the body, so the export has something to embed.
+    s, shot = multipart("/api/attachments",
+                        {"files": (f"console-{RUN}.png", PNG, "image/png")},
+                        {"entity_type": "knowledge", "entity_id": str(eid)})
+    shot_id = shot[0]["id"] if s == 200 and shot else None
+    call("PUT", f"/api/knowledge/{eid}", {"body": EXPORT_BODY + (
+        f"\n![Console screenshot](/api/attachments/{shot_id}/inline)\n"
+        f"\n![Somewhere else](https://example.invalid/not-mine.png)\n")})
+
+    status, blob, headers = raw(f"/api/knowledge/{eid}/export/docx")
+    check("an article downloads as a Word file",
+          status == 200 and blob[:2] == b"PK", f"{status} {blob[:8]!r}")
+    check("declared as a Word document rather than a blob",
+          "wordprocessingml.document" in headers.get("Content-Type", ""),
+          headers.get("Content-Type"))
+    check("and named after the article, not after its id",
+          f'filename="KB Export {RUN}.docx"' in headers.get("Content-Disposition", ""),
+          headers.get("Content-Disposition"))
+
+    import io as _io, zipfile as _zip
+    z = _zip.ZipFile(_io.BytesIO(blob))
+    media = [n for n in z.namelist() if n.startswith("word/media/")]
+    check("the image in the body is embedded in the file itself",
+          len(media) == 1, str(media))
+    document = z.read("word/document.xml").decode()
+    # The body can hold any URL. A server that fetched them while building a
+    # document is a server that fetches whatever a note tells it to.
+    check("an image hosted elsewhere is not fetched by the server",
+          "example.invalid/not-mine" not in document, "an outside URL was pulled in")
+    check("its alt text is written instead, so nothing silently vanishes",
+          "Somewhere else" in document)
+
+    props = z.read("docProps/core.xml").decode()
+    check("the article's tags travel in the document properties",
+          f"kb{RUN}" in props, props[:300])
+    check("and which article it came from",
+          f"WCC article #{eid}" in props, props[:300])
+
+    # ---- the round trip: the only test that proves the export kept anything --
+    s, back = multipart("/api/knowledge/import/docx",
+                        {"file": (f"exported-{RUN}.docx", blob, DOCX_TYPE)})
+    rt = back.get("article") if s == 200 else None
+    check("the exported file imports back into WCC", s == 200 and rt, f"{s} {str(back)[:160]}")
+    if rt:
+        made_articles.append(rt["id"])
+        body = rt["body"]
+        check("headings come home at the level they left",
+              "## Restarting the channel" in body, body[:200])
+        check("bullets come home as bullets",
+              "- Stop the listener" in body and "- Start the listener" in body, body[:400])
+        check("numbered steps keep their numbers",
+              "1. Raise the change" in body and "2. Get the" in body, body[:500])
+        check("bold survives", "**DR pair**" in body, body[:300])
+        check("italics survive", "*change number*" in body, body[:300])
+        check("inline code survives", "`approval`" in body, body[:500])
+        # The reason the exporter writes a paragraph style literally called
+        # "Code": it is the name the importer's style map reads back.
+        check("a code block comes home fenced rather than as prose",
+              "```" in body and "DISPLAY QSTATUS(SBI.*)" in body,
+              [l for l in body.split("\n") if "QSTATUS" in l][:2])
+        check("and keeps its second line, instead of running both into one",
+              "STOP CHANNEL(SBI.TO.CORE)" in body
+              and "DISPLAY QSTATUS(SBI.*) mqsc> STOP" not in body, body[-400:])
+        check("a quote comes home as a quote",
+              "> Never do this during a cutover window." in body, body[:600])
+        check("a link keeps where it points",
+              "[vendor guide](https://example.invalid/mq)" in body, body[-300:])
+        rows = [l for l in body.split("\n") if l.startswith("|")]
+        check("the table keeps its real header rather than a blank one",
+              rows and "| Node | Role | Port |" in rows[0], str(rows[:3]))
+        check("and the header is not carrying Word's own bold markers",
+              not any("**" in r for r in rows), str(rows[:3]))
+        check("the embedded image becomes an attachment again",
+              "/api/attachments/" in body and "![" in body, body[-300:])
+        # Known and deliberate: Word keeps list nesting in its numbering
+        # definitions rather than in the style name, so a sub-bullet comes
+        # home one level up. Asserted so that fixing it is a decision rather
+        # than a surprise.
+        check("a second-level bullet comes home flattened, as documented",
+              "- watch for in-flight messages" in body, body[:400])
+
+        # Stability: whatever the first trip changes, a second must not keep
+        # changing. An export that drifts every time is one nobody can trust
+        # to be the same document twice.
+        status2, blob2, _ = raw(f"/api/knowledge/{rt['id']}/export/docx")
+        s, back2 = multipart("/api/knowledge/import/docx",
+                             {"file": (f"exported-twice-{RUN}.docx", blob2, DOCX_TYPE)})
+        rt2 = back2.get("article") if s == 200 else None
+        if rt2:
+            made_articles.append(rt2["id"])
+            # Image references renumber (a new attachment row each import), so
+            # they are normalised out before comparing.
+            import re as _re2
+            norm = lambda t: _re2.sub(r"/api/attachments/\d+/", "/api/attachments/N/", t)
+            check("a second trip through Word changes nothing further",
+                  norm(rt2["body"]) == norm(body),
+                  f"{norm(rt2['body'])[:200]!r} vs {norm(body)[:200]!r}")
+
+s, empty = call("POST", "/api/knowledge",
+                {"title": f"KB Empty export {RUN}", "kind": "NOTE"})
+if s == 200:
+    made_articles.append(empty["id"])
+    status, blob3, headers3 = raw(f"/api/knowledge/{empty['id']}/export/docx")
+    check("an article with no body still exports rather than failing",
+          status == 200 and blob3[:2] == b"PK", f"{status} {len(blob3)}B")
+
+s, odd = call("POST", "/api/knowledge",
+              {"title": f'KB MQ: DC/DR "live" {RUN}?', "kind": "NOTE", "body": "x"})
+if s == 200:
+    made_articles.append(odd["id"])
+    status, _, headers4 = raw(f"/api/knowledge/{odd['id']}/export/docx")
+    name = headers4.get("Content-Disposition", "").split('filename="')[-1].rstrip('"')
+    check("a title full of characters a filesystem hates is cleaned up",
+          status == 200 and name.endswith(".docx")
+          and not any(c in name for c in '/:"?*<>|'),
+          name)
+
+status, _, _ = raw("/api/knowledge/999999/export/docx")
+check("exporting an article that does not exist is a 404", status == 404, str(status))
+
+
 section("Knowledge: an article's files go with it")
 
 s, doomed = call("POST", "/api/knowledge", {"title": f"KB doomed {RUN}", "kind": "NOTE"})
